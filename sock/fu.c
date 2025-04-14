@@ -9,7 +9,7 @@
 
 int main() {
     int server_fd, new_socket;
-    struct sockaddr_in address;
+    struct sockaddr_in saddres;
     int opt = 1;
     int addrlen = sizeof(address);
     char buffer[BUFFER_SIZE] = {0};
@@ -27,9 +27,9 @@ int main() {
     }
 
     // 设置服务器地址结构
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(PORT);
+    address.sin_family = AF_INET;                // 选择 IPv4
+    address.sin_addr.s_addr = INADDR_ANY;       // 绑定到所有可用接口
+    address.sin_port = htons(PORT);               // 设置端口号
 
     // 绑定 socket 到地址和端口
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
