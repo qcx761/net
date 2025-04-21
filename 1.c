@@ -5,9 +5,8 @@
 #include <arpa/inet.h>
 
 int main() {
-    const char *hostname = "www.example.com";
+    const char *hostname = "www.bilibili.com";
     struct hostent *he;
-    struct in_addr addr;
 
     // 获取主机信息
     he = gethostbyname(hostname);
