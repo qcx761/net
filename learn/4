@@ -1,0 +1,4 @@
+​​设置 IP 地址​​	必须二进制	inet_pton(AF_INET, "192.0.2.1", &sa.sin_addr)
+​​获取 IP 地址（字符串）​​	必须二进制 → 字符串	inet_ntop(AF_INET, &sa.sin_addr, ip_str, sizeof(ip_str))
+​​设置端口号​​	必须二进制（网络字节序）	sa.sin_port = htons(8080)
+​​特殊 IP​​	直接赋值二进制	sa.sin_addr.s_addr = INADDR_ANY（0x00000000）
