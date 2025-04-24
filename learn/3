@@ -1,2 +1,10 @@
 ssize_t sendto(int sockfd, const void *buf, size_t len, int flags,const struct sockaddr *dest_addr, socklen_t addrlen);
 ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags,struct sockaddr *src_addr, socklen_t *addrlen);
+
+// 3. sockaddr vs sockaddr_in vs sockaddr_in6​​
+// 特性	         sockaddr	              sockaddr_in（IPv4）	sockaddr_in6（IPv6）
+// ​​地址族​​	      sa_family_t（需手动设置）	AF_INET	                AF_INET6
+// ​​IP 地址存储​​	  sa_data（二进制，不直观）	sin_addr（32 位 IPv4）	  sin6_addr（128 位 IPv6）
+// ​​端口号存储​​	   无（需手动解析 sa_data）	sin_port（16 位）	       sin6_port（16 位）
+// ​​适用场景​​      	通用（较少直接使用）	IPv4 地址	             IPv6 地址
+// ​​是否包含 Socket 类型​​	❌ 不包含           	❌ 不包含	                ❌ 不包含
