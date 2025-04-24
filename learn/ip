@@ -1,0 +1,104 @@
+; 形式	示例	说明
+; ​​文本（字符串）​​	  "192.168.1.1"	             人类可读的 IP 地址
+; ​​二进制（网络字节序）​​	0xC0A80101	               计算机存储的 IP 地址（大端序）
+; ​​in_addr_t​​	         3232235777	                32 位无符号整数（htonl(0xC0A80101)）
+; ​​struct in_addr​​	{ .s_addr = 0xC0A80101 }	结构体封装的二进制 IP
+
+; ​​2. IP 地址的转换方法​​
+; ​​(1) 文本 → 二进制（字符串 → in_addr_t）​​
+; ​​方法 1：inet_pton()（推荐）​​
+; c
+; #include <arpa/inet.h>
+
+; int inet_pton(int af, const char *src, void *dst);
+; ​​af​​：地址族（AF_INET 或 AF_INET6）
+; ​​src​​：文本 IP 地址（如 "192.168.1.1"）
+; ​​dst​​：存储二进制结果的缓冲区（struct in_addr 或 struct in6_addr）
+
+
+#include <stdio.h>
+#include <arpa/inet.h>
+
+int main() {
+    const char *ip_str = "192.168.1.1";
+    struct in_addr ip_bin;
+
+    if (inet_pton(AF_INET, ip_str, &ip_bin) <= 0) {
+        perror("inet_pton failed");
+        return 1;
+    }
+
+    printf("Binary IP: 0x%08X\n", ip_bin.s_addr); // 输出: 0xC0A80101
+    return 0;
+}
+
+
+
+; 二进制 → 文本（in_addr_t → 字符串）​​
+; ​​方法 1：inet_ntop()（推荐）​​
+; c
+; #include <arpa/inet.h>
+
+; const char *inet_ntop(int af, const void *src, char *dst, socklen_t size);
+; ​​af​​：地址族（AF_INET 或 AF_INET6）
+; ​​src​​：二进制 IP 地址（struct in_addr 或 struct in6_addr）
+; ​​dst​​：存储文本结果的缓冲区
+; ​​size​​：缓冲区大小（INET_ADDRSTRLEN 或 INET6_ADDRSTRLEN）
+​​
+
+
+#include <stdio.h>
+#include <arpa/inet.h>
+
+int main() {
+    struct in_addr ip_bin = { .s_addr = 0xC0A80101 }; // 192.168.1.1
+    char ip_str[INET_ADDRSTRLEN];
+
+    if (inet_ntop(AF_INET, &ip_bin, ip_str, sizeof(ip_str)) == NULL) {
+        perror("inet_ntop failed");
+        return 1;
+    }
+
+    printf("Text IP: %s\n", ip_str); // 输出: 192.168.1.1
+    return 0;
+}
+
+
+
+;  端口号的转换​​
+; 端口号需要转换为 ​​网络字节序（大端序）​​，使用 htons()（主机 → 网络）和 ntohs()（网络 → 主机）。
+
+​​
+
+#include <stdio.h>
+#include <arpa/inet.h>
+
+int main() {
+    uint16_t port_host = 8080; // 主机字节序
+    uint16_t port_net = htons(port_host); // 转换为网络字节序
+
+    printf("Host port: %d\n", port_host); // 输出: 8080
+    printf("Network port: 0x%04X\n", port_net); // 输出: 0x1F90 (8080 的大端序)
+
+    uint16_t port_host_back = ntohs(port_net); // 转换回主机字节序
+    printf("Converted back: %d\n", port_host_back); // 输出: 8080
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+场景	                                  推荐函数	                                                                          示例
+​​文本 → 二进制（IPv4）​              ​	inet_pton(AF_INET, "192.168.1.1", &ip_bin)	                                           0xC0A80101
+​​二进制 → 文本（IPv4）​​	           inet_ntop(AF_INET, &ip_bin, ip_str, sizeof(ip_str))                                    	"192.168.1.1"
+​​端口号转换​​	                        htons(8080) （主机 → 网络）、ntohs(8080)（网络 → 主机）                                    	0x1F90
+​​设置 sockaddr_in​​	server_addr.sin_port = htons(8080); inet_pton(AF_INET, "192.168.1.1", &server_addr.sin_addr);	           -
