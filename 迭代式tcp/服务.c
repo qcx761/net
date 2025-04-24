@@ -67,7 +67,7 @@ int main(int argc, char *argv[]) {
             continue; // 失败则尝试下一个地址
 
         // 设置SO_REUSEADDR选项（避免重启时地址占用）
-        if (setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) {
+        if (setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval))) {
             close(lfd);
             continue;
         }
