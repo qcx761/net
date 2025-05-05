@@ -4,8 +4,9 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 
+
 int main(){
-    inetConnect
     
+
     return 0;
 }
