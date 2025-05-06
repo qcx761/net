@@ -1,0 +1,30 @@
+struct msghdr {
+    void         *msg_name;       // 可选地址（用于非连接套接字）
+    socklen_t     msg_namelen;    // 地址长度
+    struct iovec *msg_iov;        // 数据缓冲区数组（分散/聚集 I/O）
+    int           msg_iovlen;     // msg_iov 中的元素数量
+    void         *msg_control;    // 辅助数据（控制信息）
+    socklen_t     msg_controllen; // 辅助数据长度
+    int           msg_flags;      // 接收消息的标志位
+};
+
+
+
+
+; sendmsg​​
+; #include <sys/socket.h>
+
+; ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags);
+; ​​sockfd​​：套接字文件描述符。
+; ​​msg​​：指向 struct msghdr 结构体的指针，包含要发送的数据、地址等信息。
+; ​​flags​​：控制发送行为的标志位（如 MSG_DONTWAIT、MSG_MORE 等）。
+; ​​返回值​​：成功时返回发送的字节数，失败时返回 -1 并设置 errno。
+; ​​recvmsg​​
+
+; #include <sys/socket.h>
+
+; ssize_t recvmsg(int sockfd, struct msghdr *msg, int flags);
+; ​​sockfd​​：套接字文件描述符。
+; ​​msg​​：指向 struct msghdr 结构体的指针，用于存储接收到的数据、地址等信息。
+; ​​flags​​：控制接收行为的标志位（如 MSG_TRUNC、MSG_CTRUNC 等）。
+; ​​返回值​​：成功时返回接收的字节数，失败时返回 -1 并设置 errno。
