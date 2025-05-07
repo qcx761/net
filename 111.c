@@ -14,15 +14,15 @@ int main(){
 int* dailyTemperatures(int* temperatures, int temperaturesSize, int* returnSize) {
     *returnSize = temperaturesSize;
     int* ans = calloc(temperaturesSize, sizeof(int));
-    int* st = malloc(temperaturesSize * sizeof(int)); // 用数组模拟栈
-    int top = -1; // 栈顶下标
+    int* st = malloc(temperaturesSize * sizeof(int)); 
+    int top = -1; 
     for (int i = 0; i < temperaturesSize; i++) {
         int t = temperatures[i];
         while (top >= 0 && t > temperatures[st[top]]) {
-            int j = st[top--]; // 弹出栈顶
+            int j = st[top--]; 
             ans[j] = i - j;
         }
-        st[++top] = i; // 入栈
+        st[++top] = i; 
     }
     free(st);
     return ans;
