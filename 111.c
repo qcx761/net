@@ -10,21 +10,3 @@ int main(){
 
     return 0;
 }
-
-int* dailyTemperatures(int* temperatures, int temperaturesSize, int* returnSize) {
-    *returnSize = temperaturesSize;
-    int* ans = calloc(temperaturesSize, sizeof(int));
-    int* st = malloc(temperaturesSize * sizeof(int)); 
-    int top = -1; 
-    for (int i = 0; i < temperaturesSize; i++) {
-        int t = temperatures[i];
-        while (top >= 0 && t > temperatures[st[top]]) {
-            int j = st[top--]; 
-            ans[j] = i - j;
-        }
-        st[++top] = i; 
-    }
-    free(st);
-    return ans;
-}
-
