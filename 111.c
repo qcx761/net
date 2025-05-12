@@ -59,11 +59,7 @@ int main(int arg, char *argv[]){
             printf("Accept Error!\n");
             exit(1);
         }
-        id++;
-        printf("id + 1 :%d\n", id);
-        visitor++;
-        online_visitor++;
-        if(pthread_create(&thread_id,NULL,(void *)&system_accept,(void *)&cli_sockfd)==-1){ 
+        NULL,(void *)&system_accept,(void *)&cli_sockfd)==-1){ 
             printf("pthread_create error!\n");
             exit(1);
         }        
