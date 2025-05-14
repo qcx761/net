@@ -8,34 +8,41 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <bits/pthreadtypes.h>
 
 #define PORT 2100
 #define PORT1 5000
+#define SIZE 1024
 
-void handle_client(int control_socket) {
-    char buffer[1024];
+void handle_client(int control_socket){
+    char buffer[SIZE];
     
     while(1){
         // 清空缓冲区
         memset(buffer,0,sizeof(buffer));
-        // 接收客户端消息
-        int received=recv(control_socket,buffer,sizeof(buffer)-1,0);
-        if(received<=0){
+        int received;
+        if((received=recv(control_socket,buffer,sizeof(buffer)-1,0))<=0){
             break;
         }
         
+
+
         // 处理 PASV 命令
-        if (strncmp(buffer, "PASV", 4) == 0) {
+        if(strncmp(buffer,"PASV",4)==0){
             // 生成数据端口并回复客户端
-            int h1 = 192, h2 = 168, h3 = 1, h4 = 1;
-            int p1 = PORT1 / 256;
-            int p2 = PORT1 % 256;
-            sprintf(buffer, "227 Entering Passive Mode (%d,%d,%d,%d,%d,%d)\r\n", h1, h2, h3, h4, p1, p2);
-            send(control_socket, buffer, strlen(buffer), 0);
+            int h1=192,h2=168,h3=1,h4=1;
+            int p1=PORT1/256;
+            int p2=PORT1%256;
+            sprintf(buffer,"227 Entering Passive Mode (%d,%d,%d,%d,%d,%d)\r\n", h1, h2, h3, h4, p1, p2);
+            send(control_socket, buffer, strlen(buffer),0);
         }
         
-        // 处理其他命令...
-        // 例如 USER、PASS、LIST 等
+        
+
+
+
+
+
     }
     
     // 关闭控制连接
@@ -72,11 +79,14 @@ int main(){
     }
 
     while (1){
-        int control_socket = accept(server_fd, NULL, NULL);
-        handle_client(control_socket);
+        int client_sock=accept(server_fd, NULL, NULL);
+        pthread_t thread_id;
+        if(pthread_create(&thread_id,NULL,handle_client,(void *)&client_sock)!=0){
+            perror("线程创建失败");
+        }
+        pthread_detach(thread_id);
     }
 
     close(server_fd);
     return 0;
-
 }
