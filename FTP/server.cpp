@@ -1,14 +1,18 @@
-#include <stdio.h>
-#include <stdlib.h>
+#include <iostream>
+#include <cstdlib>
 #include <unistd.h>
-#include <string.h>
+#include <cstring>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <bits/pthreadtypes.h>
+#include <pthread.h>
+#include <thread>
+#include "threadpool.hpp"
+
+using namespace std;
 
 #define PORT 2100
 #define PORT1 5000
@@ -50,11 +54,12 @@ void handle_client(int control_socket){
 }
 
 int main(){
-    int server_fd;
-    struct sockaddr_in ser_addr;
-    socklen_t ser_len;
+    int server_fd,client_fd;
+    struct sockaddr_in ser_addr,cli_addr;
+    socklen_t ser_len,cli_len;
 
     memset(&ser_addr,0,sizeof(ser_addr));
+    memset(&cli_addr,0,sizeof(cli_addr));
     if((server_fd=socket(AF_INET,SOCK_STREAM,0))<0){
         perror("Socket creation failed");
         exit(-1);
@@ -78,14 +83,18 @@ int main(){
         exit(-1);
     }
 
-    while (1){
-        int client_sock=accept(server_fd, NULL, NULL);
-        pthread_t thread_id;
-        if(pthread_create(&thread_id,NULL,handle_client,(void *)&client_sock)!=0){
-            perror("线程创建失败");
+    while(1){
+        if((client_fd=accept(server_fd,(struct sockaddr*)&cli_addr,&cli_len))<0){
+            printf("Accept Error!\n");
+            exit(1);
         }
-        pthread_detach(thread_id);
+        threadpool pool(10);
+
+        std::thread client_thread(handle_client, client_fd);
+        pool.Add_task
+        client_thread.detach();
     }
+    
 
     close(server_fd);
     return 0;
