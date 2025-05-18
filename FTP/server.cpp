@@ -18,8 +18,8 @@ using namespace std;
 #define PORT1 5000
 #define SIZE 1024
 
-threadpool pool(10);
-
+threadpool control_pool(10); // 控制连接线程池
+threadpool data_pool(10);     // 数据连接线程池
 
 // void handle_client(int control_fd) {
 //     // 处理控制命令的逻辑
@@ -44,30 +44,97 @@ threadpool pool(10);
 //     data_pool.enqueue(handle_data_transfer, data_fd);
 // }
 
+// void handle_PASV(struct FtpClient* client) {
 
-void handle_client(int control_socket){
+// 	if (client->_data_socket > 0) {
+// 		close(client->_data_socket);
+// 		client->_data_socket = -1;
+// 	}
+// 	if (client->_data_server_socket > 0) {
+// 		close(client->_data_server_socket);
+// 	}
+// 	client->_data_server_socket = socket(AF_INET, SOCK_STREAM, 0);
+// 	if (client->_data_server_socket < 0) {
+// 		perror("opening socket error");
+// 		send_msg(client->_client_socket, "426 pasv failure\r\n");
+// 		return;
+// 	}
+// 	struct sockaddr_in server;
+// 	server.sin_family = AF_INET;
+// 	server.sin_addr.s_addr = inet_addr(client->_ip);
+// 	server.sin_port = htons(0);
+// 	if (bind(client->_data_server_socket, (struct sockaddr*) &server,
+// 			sizeof(struct sockaddr)) < 0) {
+// 		perror("binding error");
+// 		send_msg(client->_client_socket, "426 pasv failure\r\n");
+// 		return;
+// 	}
+// 	show_log("server is estabished. Waiting for connnect...");
+// 	if (listen(client->_data_server_socket, 1) < 0) {
+// 		perror("listen error...\r\n");
+// 		send_msg(client->_client_socket, "426 pasv failure\r\n");
+// 	}
+// 	struct sockaddr_in file_addr;
+// 	socklen_t file_sock_len = sizeof(struct sockaddr);
+// 	getsockname(client->_data_server_socket, (struct sockaddr*) &file_addr,
+// 			&file_sock_len);
+// 	show_log(client->_ip);
+// 	int port = ntohs(file_addr.sin_port);
+// 	show_log(parseInt2String(port));
+// 	char* msg = _transfer_ip_port_str(client->_ip, port);
+// 	char buf[200];
+// 	strcpy(buf, "227 Entering Passive Mode (");
+// 	strcat(buf, msg);
+// 	strcat(buf, ")\r\n");
+// 	send_msg(client->_client_socket, buf);
+// 	free(msg);
+
+// }
+
+
+void send_response(int client_fd,const string& message){
+    string response=message+"\r\n"; // FTP协议的CRLF结尾
+    send(client_fd,response.c_str(),response.size(),0); // 发送响应
+}
+
+void handle_pasv(control_fd){   
+;
+}
+void handle_list(control_fd){
+;
+}
+void handle_retr(control_fd){
+;
+}
+void handle_stor(control_fd){
+;
+}
+
+
+
+void handle_client(int control_fd){
     char buffer[SIZE];
     
     while(1){
         memset(buffer,0,sizeof(buffer));
         int received;
-        if((received=recv(control_socket,buffer,sizeof(buffer)-1,0))<0){
+        if((received=recv(control_fd,buffer,sizeof(buffer)-1,0))<0){
             perror("recv failed");
         }        
-        // if(buffer=="PASV"){
-        //     handle_pasv_command(control_fd, data_pool);
-        // }else if(buffer=="LIST"){
-        //     handle_list_command(control_fd, data_pool);
-        // }else if(buffer=="RETR"){
-        //     handle_retr_command(control_fd, data_pool);
-        // }else if(buffer=="STOR"){
-        //     handle_stor_command(control_fd, data_pool);
-        // }else if(buffer=="QUIT"){
-        //     send_response(control_fd, "221 Goodbye.");
-        //     break; // 退出循环
-        // }else {
-        //     send_response(control_fd, "500 Unknown command.");
-        // }
+        if(buffer=="PASV"){
+            handle_pasv(control_fd);
+        }else if(buffer=="LIST"){
+            handle_list(control_fd);
+        }else if(buffer=="RETR"){
+            handle_retr(control_fd);
+        }else if(buffer=="STOR"){
+            handle_stor(control_fd);
+        }else if(buffer=="QUIT"){
+            send_response(control_fd,"221 Goodbye.");
+            break;
+        }else {
+            send_response(control_fd,"500 Unknown command.");
+        }
 
 
         
@@ -79,8 +146,12 @@ void handle_client(int control_socket){
     }
     
     // 关闭控制连接
-    close(control_socket);
+    close(control_fd);
 }
+
+
+
+
 
 int main(){
     int server_fd,client_fd;
@@ -120,7 +191,7 @@ int main(){
             exit(1);
         }
         std::thread client_thread(handle_client, client_fd);
-        //pool.enqueue(handle_client,client_fd);
+        //control_pool.enqueue(handle_client,client_fd);
         //？
         client_thread.detach();
 
