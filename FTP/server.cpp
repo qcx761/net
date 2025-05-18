@@ -17,6 +17,7 @@ using namespace std;
 #define PORT 2100
 #define PORT1 5000
 #define SIZE 1024
+#define EPSIZE 1024
 
 threadpool control_pool(10); // 控制连接线程池
 threadpool data_pool(10);     // 数据连接线程池
@@ -136,12 +137,7 @@ void handle_client(int control_fd){
             send_response(control_fd,"500 Unknown command.");
         }
 
-
-        
-        
-        
-
-
+//?????????????????????
 
     }
     
@@ -149,17 +145,27 @@ void handle_client(int control_fd){
     close(control_fd);
 }
 
+class FTP{
+    public:
+    FTP(){
+
+    }
+    ~FTP(){
+        close(epdf);
+    }
+    
+}
 
 
 
-
-int main(){
+void FTP_init(){
     int server_fd,client_fd;
     struct sockaddr_in ser_addr,cli_addr;
     socklen_t ser_len,cli_len;
 
     memset(&ser_addr,0,sizeof(ser_addr));
     memset(&cli_addr,0,sizeof(cli_addr));
+
     if((server_fd=socket(AF_INET,SOCK_STREAM,0))<0){
         perror("Socket creation failed");
         exit(-1);
@@ -183,6 +189,32 @@ int main(){
         exit(-1);
     }
 
+    int epfd=epoll_create(EPSIZE);
+    if(epfd==-1){
+        perror("epoll_create failed");
+        return;
+    }
+
+    ev.data.fd=server_fd;
+    ev.events=EPOLLIN|EPOLLET;
+    if(epoll_ctl(epfd,EPOLL_CTL_ADD,server_fd,&ev)==-1){
+        perror("epoll_ctl failed");
+        return;
+    }
+
+    //记得close(epdf)
+}
+
+
+void FTP_start(){
+    while()
+}
+
+
+
+int main(){
+    
+
     
 
     while(1){
@@ -197,7 +229,6 @@ int main(){
 
 
 
-//？？？？？？？？？？？？？？？？？？？？？？？？？？？？
 
 
 
