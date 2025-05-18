@@ -18,9 +18,15 @@ using namespace std;
 #define PORT1 5000
 #define SIZE 1024
 #define EPSIZE 1024
+#define maxevents 1024
 
 threadpool control_pool(10); // 控制连接线程池
 threadpool data_pool(10);     // 数据连接线程池
+
+struct epoll_event {
+    uint32_t events;    // 发生的事件类型（如 EPOLLIN、EPOLLOUT）
+    epoll_data_t data;  // 用户自定义数据（通常存储 FD）
+};
 
 // void handle_client(int control_fd) {
 //     // 处理控制命令的逻辑
@@ -145,9 +151,74 @@ void handle_client(int control_fd){
     close(control_fd);
 }
 
+//???????????????????????????????????????
 class FTP{
     public:
     FTP(){
+
+
+    }
+    void FTP_init(){
+        int server_fd,client_fd;
+        struct sockaddr_in ser_addr,cli_addr;
+        socklen_t ser_len,cli_len;
+    
+        memset(&ser_addr,0,sizeof(ser_addr));
+        memset(&cli_addr,0,sizeof(cli_addr));
+    
+        if((server_fd=socket(AF_INET,SOCK_STREAM,0))<0){
+            perror("Socket creation failed");
+            exit(-1);
+            //exit(EXIT_FAILURE);
+        }
+    
+        ser_addr.sin_family=AF_INET;
+        ser_addr.sin_addr.s_addr=htonl(INADDR_ANY);
+        ser_addr.sin_port=htons(PORT);
+        ser_len=sizeof(ser_addr);
+    
+        if(bind(server_fd,(struct sockaddr *)&ser_addr,ser_len)<0){
+            perror("Bind failed");
+            close(server_fd);
+            exit(-1);
+        }
+    
+        if(listen(server_fd,5)<0){
+            perror("Listen failed");
+            close(server_fd);
+            exit(-1);
+        }
+    
+        int epfd=epoll_create(EPSIZE);
+        if(epfd==-1){
+            perror("epoll_create failed");
+            return;
+        }
+        
+        struct epoll_event ev;
+        ev.data.fd=server_fd;
+        ev.events=EPOLLIN|EPOLLET;
+        if(epoll_ctl(epfd,EPOLL_CTL_ADD,server_fd,&ev)==-1){
+            perror("epoll_ctl failed");
+            return;
+        }
+    
+        //记得close(epdf)
+    }
+    void FTP_start(){
+        while(1){
+            struct epoll_event evlist[maxevents];
+            int n=epoll_wait(epfd,evlist,maxevents,-1);
+            if(n==-1){
+                perror("epoll_wait failed");
+                break;
+            }
+            for(int i=0;i<n;i++){
+                if(events[i].data.fd)
+            }
+        }
+
+
 
     }
     ~FTP(){
@@ -158,57 +229,10 @@ class FTP{
 
 
 
-void FTP_init(){
-    int server_fd,client_fd;
-    struct sockaddr_in ser_addr,cli_addr;
-    socklen_t ser_len,cli_len;
-
-    memset(&ser_addr,0,sizeof(ser_addr));
-    memset(&cli_addr,0,sizeof(cli_addr));
-
-    if((server_fd=socket(AF_INET,SOCK_STREAM,0))<0){
-        perror("Socket creation failed");
-        exit(-1);
-        //exit(EXIT_FAILURE);
-    }
-
-    ser_addr.sin_family=AF_INET;
-    ser_addr.sin_addr.s_addr=htonl(INADDR_ANY);
-    ser_addr.sin_port=htons(PORT);
-    ser_len=sizeof(ser_addr);
-
-    if(bind(server_fd,(struct sockaddr *)&ser_addr,ser_len)<0){
-        perror("Bind failed");
-        close(server_fd);
-        exit(-1);
-    }
-
-    if(listen(server_fd,5)<0){
-        perror("Listen failed");
-        close(server_fd);
-        exit(-1);
-    }
-
-    int epfd=epoll_create(EPSIZE);
-    if(epfd==-1){
-        perror("epoll_create failed");
-        return;
-    }
-
-    ev.data.fd=server_fd;
-    ev.events=EPOLLIN|EPOLLET;
-    if(epoll_ctl(epfd,EPOLL_CTL_ADD,server_fd,&ev)==-1){
-        perror("epoll_ctl failed");
-        return;
-    }
-
-    //记得close(epdf)
-}
 
 
-void FTP_start(){
-    while()
-}
+
+
 
 
 
