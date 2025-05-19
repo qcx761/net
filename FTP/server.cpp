@@ -23,6 +23,10 @@ using namespace std;
 threadpool control_pool(10); // 控制连接线程池
 threadpool data_pool(10);     // 数据连接线程池
 
+int server_fd;// 全局变量
+//可以扔到类里面不再看看
+
+
 struct epoll_event {
     uint32_t events;    // 发生的事件类型（如 EPOLLIN、EPOLLOUT）
     epoll_data_t data;  // 用户自定义数据（通常存储 FD）
@@ -118,7 +122,6 @@ void handle_stor(control_fd){
 }
 
 
-
 void handle_client(int control_fd){
     char buffer[SIZE];
     
@@ -158,66 +161,7 @@ class FTP{
 
 
     }
-    void FTP_init(){
-        int server_fd,client_fd;
-        struct sockaddr_in ser_addr,cli_addr;
-        socklen_t ser_len,cli_len;
     
-        memset(&ser_addr,0,sizeof(ser_addr));
-        memset(&cli_addr,0,sizeof(cli_addr));
-    
-        if((server_fd=socket(AF_INET,SOCK_STREAM,0))<0){
-            perror("Socket creation failed");
-            exit(-1);
-            //exit(EXIT_FAILURE);
-        }
-    
-        ser_addr.sin_family=AF_INET;
-        ser_addr.sin_addr.s_addr=htonl(INADDR_ANY);
-        ser_addr.sin_port=htons(PORT);
-        ser_len=sizeof(ser_addr);
-    
-        if(bind(server_fd,(struct sockaddr *)&ser_addr,ser_len)<0){
-            perror("Bind failed");
-            close(server_fd);
-            exit(-1);
-        }
-    
-        if(listen(server_fd,5)<0){
-            perror("Listen failed");
-            close(server_fd);
-            exit(-1);
-        }
-    
-        int epfd=epoll_create(EPSIZE);
-        if(epfd==-1){
-            perror("epoll_create failed");
-            return;
-        }
-        
-        struct epoll_event ev;
-        ev.data.fd=server_fd;
-        ev.events=EPOLLIN|EPOLLET;
-        if(epoll_ctl(epfd,EPOLL_CTL_ADD,server_fd,&ev)==-1){
-            perror("epoll_ctl failed");
-            return;
-        }
-    
-        //记得close(epdf)
-    }
-    void FTP_start(){
-        while(1){
-            struct epoll_event evlist[maxevents];
-            int n=epoll_wait(epfd,evlist,maxevents,-1);
-            if(n==-1){
-                perror("epoll_wait failed");
-                break;
-            }
-            for(int i=0;i<n;i++){
-                if(events[i].data.fd)
-            }
-        }
-
 
 
     }
@@ -225,11 +169,122 @@ class FTP{
         close(epdf);
     }
     
+
+
+
+
+void FTP_init(){
+    int client_fd;
+    struct sockaddr_in ser_addr,cli_addr;
+    socklen_t ser_len,cli_len;
+
+    memset(&ser_addr,0,sizeof(ser_addr));
+    memset(&cli_addr,0,sizeof(cli_addr));
+
+    if((server_fd=socket(AF_INET,SOCK_STREAM,0))<0){
+        perror("Socket creation failed");
+        exit(-1);
+        //exit(EXIT_FAILURE);
+    }
+
+    ser_addr.sin_family=AF_INET;
+    ser_addr.sin_addr.s_addr=htonl(INADDR_ANY);
+    ser_addr.sin_port=htons(PORT);
+    ser_len=sizeof(ser_addr);
+
+    if(bind(server_fd,(struct sockaddr *)&ser_addr,ser_len)<0){
+        perror("Bind failed");
+        close(server_fd);
+        exit(-1);
+    }
+
+    if(listen(server_fd,5)<0){
+        perror("Listen failed");
+        close(server_fd);
+        exit(-1);
+    }
+
+    int epfd=epoll_create(EPSIZE);
+    if(epfd==-1){
+        perror("epoll_create failed");
+        return;
+    }
+    
+    struct epoll_event ev;
+    ev.data.fd=server_fd;
+    ev.events=EPOLLIN|EPOLLET;
+    if(epoll_ctl(epfd,EPOLL_CTL_ADD,server_fd,&ev)==-1){
+        perror("epoll_ctl failed");
+        return;
+    }
+
+    //记得close(epdf)
 }
+void FTP_start(){
+    while(1){
+        struct epoll_event evlist[maxevents];
+        int n=epoll_wait(epfd,evlist,maxevents,-1);
+        if(n==-1){
+            perror("epoll_wait failed");
+            break;
+        }
+        for(int i=0;i<n;i++){
+            if(events[i].data.fd==server_fd){ // 客户端连接
+                sockaddr_in client_addr{};
+                socklen_t client_len=sizeof(client_addr);
+                int connect_fd=accept(server_fd,(sockaddr*)&client_addr,&client_len);
+                if(connect_fd==-1){
+                    perror("accept");
+                    continue;
+                }
 
+                // 设置非阻塞模式
+                fcntl(connect_fd,F_SETFL,fcntl(connect_fd,F_GETFL,0)|O_NONBLOCK);
 
+                // 注册客户端连接到 epoll
+                ev.events=EPOLLIN|EPOLLET;
+                ev.data.fd=connect_fd;
+                if(epoll_ctl(epfd,EPOLL_CTL_ADD,connect_fd,&ev)==-1){
+                    perror("epoll_ctl");
+                    close(connect_fd);
+                }
+            else{    // 客户端
+                if(events[i].events&EPOLLIN){// 处理可读事件
+                    char buf[1024];
+                    while(1){
+                    // memset(buf,0,sizeof(buf));
+                    ssize_t len=read(events[i].data.fd,buf,sizeof(buf));
+                    if(len<=0){
+                        if(len==0){ // 客户端主动关闭
+                            printf("Client disconnected: %d\n",events[i].data.fd);
+                        }else{ // 连接出错
+                            perror("read failed");
+                        }
+                        close(events[i].data.fd);
+                        epoll_ctl(epfd,EPOLL_CTL_DEL,events[i].data.fd,nullptr);
+                
+                    }
+                    }else{
+                    
+                        //写个处理函数处理buf数组
+                        // ？？？？？
 
+                            //上面的if再详细看看
 
+                    // 处理数据（这里简单回显）
+                    // write(events[i].data.fd, buf, len);
+                
+
+                    }
+                }
+                    if(events[i].events&EPOLLOUT){// 处理可写事件
+
+                    }
+                }
+            }
+        }
+    }
+}
 
 
 

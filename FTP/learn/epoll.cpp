@@ -56,7 +56,6 @@ int main() {
             break;
         }
 
-        // 直接处理事件（不封装成 handle 函数）
         for (int i = 0; i < n; i++) {
             if (events[i].data.fd == listen_fd) {
                 // 新连接到来
