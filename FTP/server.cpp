@@ -169,7 +169,24 @@ class FTP{
         close(epdf);
     }
     
+void handle_msg(int fd,char *buf){
+    
 
+
+    while(1){
+        if((client_fd=accept(server_fd,(struct sockaddr*)&cli_addr,&cli_len))<0){
+            printf("Accept Error!\n");
+            exit(1);
+        }
+        std::thread client_thread(handle_client, client_fd);
+        //control_pool.enqueue(handle_client,client_fd);
+        //？
+        client_thread.detach();
+
+
+
+
+}
 
 
 
@@ -265,20 +282,24 @@ void FTP_start(){
                 
                     }
                     }else{
-                    
+                        std::thread client_thread(handle_msg,events[i].data.fd,buf);
+                        //control_pool.enqueue(handle_client,client_fd);
+                        //?????
+                        client_thread.detach();
+                
+                        // 创建线程？
+                        // handle_msg(buf);
                         //写个处理函数处理buf数组
                         // ？？？？？
 
-                            //上面的if再详细看看
 
-                    // 处理数据（这里简单回显）
-                    // write(events[i].data.fd, buf, len);
+
                 
-
+                        //控制连接和数据连接的实现与绑定
                     }
                 }
                     if(events[i].events&EPOLLOUT){// 处理可写事件
-
+                        ;
                     }
                 }
             }
@@ -296,15 +317,7 @@ int main(){
 
     
 
-    while(1){
-        if((client_fd=accept(server_fd,(struct sockaddr*)&cli_addr,&cli_len))<0){
-            printf("Accept Error!\n");
-            exit(1);
-        }
-        std::thread client_thread(handle_client, client_fd);
-        //control_pool.enqueue(handle_client,client_fd);
-        //？
-        client_thread.detach();
+   
 
 
 
