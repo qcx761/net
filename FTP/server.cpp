@@ -23,6 +23,19 @@ using namespace std;
 threadpool control_pool(10); // 控制连接线程池
 threadpool data_pool(10);     // 数据连接线程池
 
+
+typedef struct control_connect{
+    int control_fd;     // 控制连接的文件描述符
+    // 其他相关信息
+}Dontrol_connect;
+
+
+typedef struct data_connect{
+    int data_fd;        // 数据连接的文件描述符
+    // 其他相关信息
+}Data_connect;
+
+
 int server_fd;// 全局变量
 //可以扔到类里面不再看看
 
@@ -31,6 +44,8 @@ struct epoll_event {
     uint32_t events;    // 发生的事件类型（如 EPOLLIN、EPOLLOUT）
     epoll_data_t data;  // 用户自定义数据（通常存储 FD）
 };
+
+
 
 // void handle_client(int control_fd) {
 //     // 处理控制命令的逻辑
@@ -173,16 +188,6 @@ void handle_msg(int fd,char *buf){
     
 
 
-    while(1){
-        if((client_fd=accept(server_fd,(struct sockaddr*)&cli_addr,&cli_len))<0){
-            printf("Accept Error!\n");
-            exit(1);
-        }
-        std::thread client_thread(handle_client, client_fd);
-        //control_pool.enqueue(handle_client,client_fd);
-        //？
-        client_thread.detach();
-
 
 
 
@@ -246,6 +251,9 @@ void FTP_start(){
             break;
         }
         for(int i=0;i<n;i++){
+
+
+
             if(events[i].data.fd==server_fd){ // 客户端连接
                 sockaddr_in client_addr{};
                 socklen_t client_len=sizeof(client_addr);
@@ -265,44 +273,48 @@ void FTP_start(){
                     perror("epoll_ctl");
                     close(connect_fd);
                 }
-            else{    // 客户端
+            }else{    // 客户端
                 if(events[i].events&EPOLLIN){// 处理可读事件
                     char buf[1024];
                     while(1){
                     // memset(buf,0,sizeof(buf));
                     ssize_t len=read(events[i].data.fd,buf,sizeof(buf));
-                    if(len<=0){
-                        if(len==0){ // 客户端主动关闭
-                            printf("Client disconnected: %d\n",events[i].data.fd);
-                        }else{ // 连接出错
-                            perror("read failed");
+                        if(len<=0){
+                            if(len==0){ // 客户端主动关闭
+                                printf("Client disconnected: %d\n",events[i].data.fd);
+                            }else{ // 连接出错
+                                perror("read failed");
+                            }
+                            close(events[i].data.fd);
+                            epoll_ctl(epfd,EPOLL_CTL_DEL,events[i].data.fd,nullptr);
+                        }else{
+
+
+                            Control_connect 
+
+
+                            std::thread client_thread(handle_msg,events[i].data.fd,buf);
+                            //control_pool.enqueue(handle_client,client_fd);
+                            //?????
+                            client_thread.detach();
+                
+                            // 创建线程？
+                            // handle_msg(buf);
+                            //写个处理函数处理buf数组
+                            // ？？？？？
+
+
+
+                
+                            //控制连接和数据连接的实现与绑定
                         }
-                        close(events[i].data.fd);
-                        epoll_ctl(epfd,EPOLL_CTL_DEL,events[i].data.fd,nullptr);
-                
-                    }
-                    }else{
-                        std::thread client_thread(handle_msg,events[i].data.fd,buf);
-                        //control_pool.enqueue(handle_client,client_fd);
-                        //?????
-                        client_thread.detach();
-                
-                        // 创建线程？
-                        // handle_msg(buf);
-                        //写个处理函数处理buf数组
-                        // ？？？？？
-
-
-
-                
-                        //控制连接和数据连接的实现与绑定
                     }
                 }
-                    if(events[i].events&EPOLLOUT){// 处理可写事件
-                        ;
-                    }
+                if(events[i].events&EPOLLOUT){// 处理可写事件
+                    ;
                 }
             }
+            // free???
         }
     }
 }
