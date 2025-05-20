@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <dirent.h>
+#include <sys/epoll.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -23,27 +24,61 @@ using namespace std;
 threadpool control_pool(10); // 控制连接线程池
 threadpool data_pool(10);     // 数据连接线程池
 
-
-typedef struct control_connect{
-    int control_fd;     // 控制连接的文件描述符
-    // 其他相关信息
-}Dontrol_connect;
-
-
-typedef struct data_connect{
-    int data_fd;        // 数据连接的文件描述符
-    // 其他相关信息
-}Data_connect;
-
-
+// ？？？？？？？？？？？？？？？？？？？？？？？？？
+struct epoll_event ev;
+std::mutex mtx; // 互斥锁
+int epfd;
 int server_fd;// 全局变量
-//可以扔到类里面不再看看
+//可以扔到类里面封装？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？/
 
-
-struct epoll_event {
-    uint32_t events;    // 发生的事件类型（如 EPOLLIN、EPOLLOUT）
-    epoll_data_t data;  // 用户自定义数据（通常存储 FD）
+class ControlConnect{
+    public:
+        int control_fd; // 控制连接的文件描述符
+        ControlConnect(int fd):control_fd(fd){
+            ;// 其他初始化代码
+        }
 };
+    
+class DataConnect{
+    public:
+        int data_fd; // 数据连接的文件描述符
+        DataConnect(int fd):data_fd(fd){
+            ;// 其他初始化代码
+        }
+};
+
+class ConnectionGroup{
+    public:
+        std::vector<ControlConnect> control_connects;
+        std::vector<DataConnect> data_connects;
+        std::map<ControlConnect, DataConnect> connections;
+    
+        // void add_control_connection(int control_fd){
+        //     control_connections.emplace_back(control_fd);
+        // }
+        
+        // void add_data_connection(int data_fd){
+        //     data_connections.emplace_back(data_fd);
+        // }
+
+        void add_connection(int control_fd,int data_fd){
+            control_connections.emplace_back(control_fd);
+            data_connections.emplace_back(data_fd);
+            connections.emplace(control_fd,data_fd);
+        }
+
+};
+
+
+
+
+
+
+
+// struct epoll_event {
+//     uint32_t events;    // 发生的事件类型（如 EPOLLIN、EPOLLOUT）
+//     epoll_data_t data;  // 用户自定义数据（通常存储 FD）
+// };
 
 
 
@@ -70,124 +105,145 @@ struct epoll_event {
 //     data_pool.enqueue(handle_data_transfer, data_fd);
 // }
 
-// void handle_PASV(struct FtpClient* client) {
 
-// 	if (client->_data_socket > 0) {
-// 		close(client->_data_socket);
-// 		client->_data_socket = -1;
-// 	}
-// 	if (client->_data_server_socket > 0) {
-// 		close(client->_data_server_socket);
-// 	}
-// 	client->_data_server_socket = socket(AF_INET, SOCK_STREAM, 0);
-// 	if (client->_data_server_socket < 0) {
-// 		perror("opening socket error");
-// 		send_msg(client->_client_socket, "426 pasv failure\r\n");
-// 		return;
-// 	}
-// 	struct sockaddr_in server;
-// 	server.sin_family = AF_INET;
-// 	server.sin_addr.s_addr = inet_addr(client->_ip);
-// 	server.sin_port = htons(0);
-// 	if (bind(client->_data_server_socket, (struct sockaddr*) &server,
-// 			sizeof(struct sockaddr)) < 0) {
-// 		perror("binding error");
-// 		send_msg(client->_client_socket, "426 pasv failure\r\n");
-// 		return;
-// 	}
-// 	show_log("server is estabished. Waiting for connnect...");
-// 	if (listen(client->_data_server_socket, 1) < 0) {
-// 		perror("listen error...\r\n");
-// 		send_msg(client->_client_socket, "426 pasv failure\r\n");
-// 	}
-// 	struct sockaddr_in file_addr;
-// 	socklen_t file_sock_len = sizeof(struct sockaddr);
-// 	getsockname(client->_data_server_socket, (struct sockaddr*) &file_addr,
-// 			&file_sock_len);
-// 	show_log(client->_ip);
-// 	int port = ntohs(file_addr.sin_port);
-// 	show_log(parseInt2String(port));
-// 	char* msg = _transfer_ip_port_str(client->_ip, port);
-// 	char buf[200];
-// 	strcpy(buf, "227 Entering Passive Mode (");
-// 	strcat(buf, msg);
-// 	strcat(buf, ")\r\n");
-// 	send_msg(client->_client_socket, buf);
-// 	free(msg);
 
+// void send_response(int client_fd,const string& message){
+//     string response=message+"\r\n"; // FTP协议的CRLF结尾
+//     send(client_fd,response.c_str(),response.size(),0); // 发送响应
+// }
+
+// void handle_pasv(control_fd){   
+// ;
+// }
+// void handle_list(control_fd){
+// ;
+// }
+// void handle_retr(control_fd){
+// ;
+// }
+// void handle_stor(control_fd){
+// ;
 // }
 
 
-void send_response(int client_fd,const string& message){
-    string response=message+"\r\n"; // FTP协议的CRLF结尾
-    send(client_fd,response.c_str(),response.size(),0); // 发送响应
-}
-
-void handle_pasv(control_fd){   
-;
-}
-void handle_list(control_fd){
-;
-}
-void handle_retr(control_fd){
-;
-}
-void handle_stor(control_fd){
-;
-}
-
-
-void handle_client(int control_fd){
-    char buffer[SIZE];
+// void handle_client(int control_fd){
+//     char buffer[SIZE];
     
-    while(1){
-        memset(buffer,0,sizeof(buffer));
-        int received;
-        if((received=recv(control_fd,buffer,sizeof(buffer)-1,0))<0){
-            perror("recv failed");
-        }        
-        if(buffer=="PASV"){
-            handle_pasv(control_fd);
-        }else if(buffer=="LIST"){
-            handle_list(control_fd);
-        }else if(buffer=="RETR"){
-            handle_retr(control_fd);
-        }else if(buffer=="STOR"){
-            handle_stor(control_fd);
-        }else if(buffer=="QUIT"){
-            send_response(control_fd,"221 Goodbye.");
-            break;
-        }else {
-            send_response(control_fd,"500 Unknown command.");
-        }
+//     while(1){
+//         memset(buffer,0,sizeof(buffer));
+//         int received;
+//         if((received=recv(control_fd,buffer,sizeof(buffer)-1,0))<0){
+//             perror("recv failed");
+//         }        
+//         if(buffer=="PASV"){
+//             handle_pasv(control_fd);
+//         }else if(buffer=="LIST"){
+//             handle_list(control_fd);
+//         }else if(buffer=="RETR"){
+//             handle_retr(control_fd);
+//         }else if(buffer=="STOR"){
+//             handle_stor(control_fd);
+//         }else if(buffer=="QUIT"){
+//             send_response(control_fd,"221 Goodbye.");
+//             break;
+//         }else {
+//             send_response(control_fd,"500 Unknown command.");
+//         }
 
 //?????????????????????
 
-    }
+    //}
     
     // 关闭控制连接
-    close(control_fd);
-}
+    //close(control_fd);
+//}
 
 //???????????????????????????????????????
-class FTP{
-    public:
-    FTP(){
 
 
-    }
+// class FTP{
+//     public:
+//     FTP(){
+
+
+//     }
     
 
 
-    }
-    ~FTP(){
-        close(epdf);
-    }
-    
-void handle_msg(int fd,char *buf){
+//     }
+//     ~FTP(){
+//         close(epdf);
+//     }
     
 
+void handle_PASV(struct FtpClient* client) {
 
+	if (client->_data_socket > 0) {
+		close(client->_data_socket);
+		client->_data_socket = -1;
+	}
+	if (client->_data_server_socket > 0) {
+		close(client->_data_server_socket);
+	}
+	client->_data_server_socket = socket(AF_INET, SOCK_STREAM, 0);
+	if (client->_data_server_socket < 0) {
+		perror("opening socket error");
+		send_msg(client->_client_socket, "426 pasv failure\r\n");
+		return;
+	}
+	struct sockaddr_in server;
+	server.sin_family = AF_INET;
+	server.sin_addr.s_addr = inet_addr(client->_ip);
+	server.sin_port = htons(0);
+	if (bind(client->_data_server_socket, (struct sockaddr*) &server,
+			sizeof(struct sockaddr)) < 0) {
+		perror("binding error");
+		send_msg(client->_client_socket, "426 pasv failure\r\n");
+		return;
+	}
+	show_log("server is estabished. Waiting for connnect...");
+	if (listen(client->_data_server_socket, 1) < 0) {
+		perror("listen error...\r\n");
+		send_msg(client->_client_socket, "426 pasv failure\r\n");
+	}
+	struct sockaddr_in file_addr;
+	socklen_t file_sock_len = sizeof(struct sockaddr);
+	getsockname(client->_data_server_socket, (struct sockaddr*) &file_addr,
+			&file_sock_len);
+	show_log(client->_ip);
+	int port = ntohs(file_addr.sin_port);
+	show_log(parseInt2String(port));
+	char* msg = _transfer_ip_port_str(client->_ip, port);
+	char buf[200];
+	strcpy(buf, "227 Entering Passive Mode (");
+	strcat(buf, msg);
+	strcat(buf, ")\r\n");
+	send_msg(client->_client_socket, buf);
+	free(msg);
+
+}
+
+// 控制连接线程
+void handle_msg(int fd,char *buf,class ConnectionGroup group){
+
+
+        while(1){
+        if(*buf=="PASV"){
+            handle_pasv(fd);
+        }else if(*buf=="LIST"){
+            handle_list(fd);
+        }else if(*buf=="RETR"){
+            handle_retr(fd);
+        }else if(*buf=="STOR"){
+            handle_stor(fd);
+        }else if(*buf=="QUIT"){
+            send_response(fd,"221 Goodbye.");
+            break;
+        }else{
+            send_response(fd,"500 Unknown command.");
+        }    
+
+    }
 
 
 
@@ -226,13 +282,13 @@ void FTP_init(){
         exit(-1);
     }
 
-    int epfd=epoll_create(EPSIZE);
+    epfd=epoll_create(EPSIZE);
     if(epfd==-1){
         perror("epoll_create failed");
         return;
     }
     
-    struct epoll_event ev;
+    
     ev.data.fd=server_fd;
     ev.events=EPOLLIN|EPOLLET;
     if(epoll_ctl(epfd,EPOLL_CTL_ADD,server_fd,&ev)==-1){
@@ -242,18 +298,16 @@ void FTP_init(){
 
     //记得close(epdf)
 }
-void FTP_start(){
+    
+void FTP_start(class ConnectionGroup group){
     while(1){
-        struct epoll_event evlist[maxevents];
-        int n=epoll_wait(epfd,evlist,maxevents,-1);
+        struct epoll_event events[maxevents];
+        int n=epoll_wait(epfd,events,maxevents,-1);
         if(n==-1){
             perror("epoll_wait failed");
             break;
         }
         for(int i=0;i<n;i++){
-
-
-
             if(events[i].data.fd==server_fd){ // 客户端连接
                 sockaddr_in client_addr{};
                 socklen_t client_len=sizeof(client_addr);
@@ -288,14 +342,17 @@ void FTP_start(){
                             close(events[i].data.fd);
                             epoll_ctl(epfd,EPOLL_CTL_DEL,events[i].data.fd,nullptr);
                         }else{
+                            
 
-
-                            Control_connect 
-
-
-                            std::thread client_thread(handle_msg,events[i].data.fd,buf);
+                        
+                            int fd=events[i].data.fd;
+                            std::thread client_thread(handle_msg,fd,buf,group);
                             //control_pool.enqueue(handle_client,client_fd);
                             //?????
+
+
+                            // 线程中要实现
+
                             client_thread.detach();
                 
                             // 创建线程？
@@ -320,27 +377,28 @@ void FTP_start(){
 }
 
 
+//epoll中的文件描述符关闭
+
+
 
 
 
 
 int main(){
-    
-
-    
-
-   
+    ConnectionGroup group;
+    // 初始化 group
 
 
 
 
 
 
-    }
-    
-
+    FTP_init();
+    FTP_start(group);
     close(server_fd);
     return 0;
+
+    // epdf  server——fd   event封装
 }
 
 // 线程池设计
