@@ -176,52 +176,52 @@ class ConnectionGroup{
 //     }
     
 
-void handle_PASV(struct FtpClient* client) {
+// void handle_PASV(struct FtpClient* client) {
 
-	if (client->_data_socket > 0) {
-		close(client->_data_socket);
-		client->_data_socket = -1;
-	}
-	if (client->_data_server_socket > 0) {
-		close(client->_data_server_socket);
-	}
-	client->_data_server_socket = socket(AF_INET, SOCK_STREAM, 0);
-	if (client->_data_server_socket < 0) {
-		perror("opening socket error");
-		send_msg(client->_client_socket, "426 pasv failure\r\n");
-		return;
-	}
-	struct sockaddr_in server;
-	server.sin_family = AF_INET;
-	server.sin_addr.s_addr = inet_addr(client->_ip);
-	server.sin_port = htons(0);
-	if (bind(client->_data_server_socket, (struct sockaddr*) &server,
-			sizeof(struct sockaddr)) < 0) {
-		perror("binding error");
-		send_msg(client->_client_socket, "426 pasv failure\r\n");
-		return;
-	}
-	show_log("server is estabished. Waiting for connnect...");
-	if (listen(client->_data_server_socket, 1) < 0) {
-		perror("listen error...\r\n");
-		send_msg(client->_client_socket, "426 pasv failure\r\n");
-	}
-	struct sockaddr_in file_addr;
-	socklen_t file_sock_len = sizeof(struct sockaddr);
-	getsockname(client->_data_server_socket, (struct sockaddr*) &file_addr,
-			&file_sock_len);
-	show_log(client->_ip);
-	int port = ntohs(file_addr.sin_port);
-	show_log(parseInt2String(port));
-	char* msg = _transfer_ip_port_str(client->_ip, port);
-	char buf[200];
-	strcpy(buf, "227 Entering Passive Mode (");
-	strcat(buf, msg);
-	strcat(buf, ")\r\n");
-	send_msg(client->_client_socket, buf);
-	free(msg);
+// 	if (client->_data_socket > 0) {
+// 		close(client->_data_socket);
+// 		client->_data_socket = -1;
+// 	}
+// 	if (client->_data_server_socket > 0) {
+// 		close(client->_data_server_socket);
+// 	}
+// 	client->_data_server_socket = socket(AF_INET, SOCK_STREAM, 0);
+// 	if (client->_data_server_socket < 0) {
+// 		perror("opening socket error");
+// 		send_msg(client->_client_socket, "426 pasv failure\r\n");
+// 		return;
+// 	}
+// 	struct sockaddr_in server;
+// 	server.sin_family = AF_INET;
+// 	server.sin_addr.s_addr = inet_addr(client->_ip);
+// 	server.sin_port = htons(0);
+// 	if (bind(client->_data_server_socket, (struct sockaddr*) &server,
+// 			sizeof(struct sockaddr)) < 0) {
+// 		perror("binding error");
+// 		send_msg(client->_client_socket, "426 pasv failure\r\n");
+// 		return;
+// 	}
+// 	show_log("server is estabished. Waiting for connnect...");
+// 	if (listen(client->_data_server_socket, 1) < 0) {
+// 		perror("listen error...\r\n");
+// 		send_msg(client->_client_socket, "426 pasv failure\r\n");
+// 	}
+// 	struct sockaddr_in file_addr;
+// 	socklen_t file_sock_len = sizeof(struct sockaddr);
+// 	getsockname(client->_data_server_socket, (struct sockaddr*) &file_addr,
+// 			&file_sock_len);
+// 	show_log(client->_ip);
+// 	int port = ntohs(file_addr.sin_port);
+// 	show_log(parseInt2String(port));
+// 	char* msg = _transfer_ip_port_str(client->_ip, port);
+// 	char buf[200];
+// 	strcpy(buf, "227 Entering Passive Mode (");
+// 	strcat(buf, msg);
+// 	strcat(buf, ")\r\n");
+// 	send_msg(client->_client_socket, buf);
+// 	free(msg);
 
-}
+// }
 
 // 控制连接线程
 void handle_msg(int fd,char *buf,class ConnectionGroup group){
@@ -290,7 +290,7 @@ void FTP_init(){
     
     
     ev.data.fd=server_fd;
-    ev.events=EPOLLIN|EPOLLET;
+    ev.events=EPOLLIN|EPOLLET|EPOLLRDHUP|EPOLLERR;
     if(epoll_ctl(epfd,EPOLL_CTL_ADD,server_fd,&ev)==-1){
         perror("epoll_ctl failed");
         return;

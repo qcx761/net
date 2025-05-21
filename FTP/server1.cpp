@@ -308,70 +308,7 @@ void FTP_start(class ConnectionGroup group){
             break;
         }
         for(int i=0;i<n;i++){
-            if(events[i].data.fd==server_fd){ // 客户端连接
-                sockaddr_in client_addr{};
-                socklen_t client_len=sizeof(client_addr);
-                int connect_fd=accept(server_fd,(sockaddr*)&client_addr,&client_len);
-                if(connect_fd==-1){
-                    perror("accept");
-                    continue;
-                }
 
-                // 设置非阻塞模式
-                fcntl(connect_fd,F_SETFL,fcntl(connect_fd,F_GETFL,0)|O_NONBLOCK);
-
-                // 注册客户端连接到 epoll
-                ev.events=EPOLLIN|EPOLLET;
-                ev.data.fd=connect_fd;
-                if(epoll_ctl(epfd,EPOLL_CTL_ADD,connect_fd,&ev)==-1){
-                    perror("epoll_ctl");
-                    close(connect_fd);
-                }
-            }else{    // 客户端
-                if(events[i].events&EPOLLIN){// 处理可读事件
-                    char buf[1024];
-                    while(1){
-                    // memset(buf,0,sizeof(buf));
-                    ssize_t len=read(events[i].data.fd,buf,sizeof(buf));
-                        if(len<=0){
-                            if(len==0){ // 客户端主动关闭
-                                printf("Client disconnected: %d\n",events[i].data.fd);
-                            }else{ // 连接出错
-                                perror("read failed");
-                            }
-                            close(events[i].data.fd);
-                            epoll_ctl(epfd,EPOLL_CTL_DEL,events[i].data.fd,nullptr);
-                        }else{
-                            
-
-                        
-                            int fd=events[i].data.fd;
-                            std::thread client_thread(handle_msg,fd,buf,group);
-                            //control_pool.enqueue(handle_client,client_fd);
-                            //?????
-
-
-                            // 线程中要实现
-
-                            client_thread.detach();
-                
-                            // 创建线程？
-                            // handle_msg(buf);
-                            //写个处理函数处理buf数组
-                            // ？？？？？
-
-
-
-                
-                            //控制连接和数据连接的实现与绑定
-                        }
-                    }
-                }
-                if(events[i].events&EPOLLOUT){// 处理可写事件
-                    ;
-                }
-            }
-            // free???
         }
     }
 }
@@ -401,12 +338,188 @@ int main(){
     // epdf  server——fd   event封装
 }
 
-// 线程池设计
-// 控制连接线程池:
 
-// 用于处理客户端的控制连接和命令（如 USER、PASS、PASV 等）。
-// 每当有新的控制连接时，从这个线程池中获取一个线程来处理。
-// 数据连接线程池:
 
-// 用于处理数据传输（如文件上传和下载）。
-// 当在控制连接中接收到 PASV 命令并建立数据连接后，从这个线程池中获取一个线程来处理数据传输。
+
+// 客户端
+if(events[i].events&EPOLLIN){// 处理可读事件
+
+
+
+
+        if(events[i].data.fd==server_fd){ // 客户端连接
+
+            // 创建线程
+        std::thread myThread([epfd,&group,&events]() {
+            sockaddr_in client_addr{};
+            socklen_t client_len=sizeof(client_addr);
+            int connect_fd=accept(server_fd,(sockaddr*)&client_addr,&client_len);
+            if(connect_fd==-1){
+                perror("accept");
+                continue;
+            }
+        
+            // 设置非阻塞模式
+            fcntl(connect_fd,F_SETFL,fcntl(connect_fd,F_GETFL,0)|O_NONBLOCK);
+        
+            // 注册客户端连接到 epoll
+            ev.events=EPOLLIN|EPOLLET;
+            ev.data.fd=connect_fd;
+            if(epoll_ctl(epfd,EPOLL_CTL_ADD,connect_fd,&ev)==-1){
+                perror("epoll_ctl");
+                close(connect_fd);
+            }
+
+
+            });
+
+            
+        }
+
+        char buf[1024];
+        while(1){
+        // memset(buf,0,sizeof(buf));
+        ssize_t len=read(events[i].data.fd,buf,sizeof(buf));
+            if(len<=0){
+                if(len==0){ // 客户端主动关闭
+                    printf("Client disconnected: %d\n",events[i].data.fd);
+                }else{ // 连接出错
+                    perror("read failed");
+                }
+                close(events[i].data.fd);
+                epoll_ctl(epfd,EPOLL_CTL_DEL,events[i].data.fd,nullptr);
+            }else{
+                
+
+            
+                int fd=events[i].data.fd;
+                std::thread client_thread(handle_msg,fd,buf,group);
+                //control_pool.enqueue(handle_client,client_fd);
+                //?????
+
+
+                // 线程中要实现
+
+                client_thread.detach();
+    
+                // 创建线程？
+                // handle_msg(buf);
+                //写个处理函数处理buf数组
+                // ？？？？？
+
+
+
+    
+                //控制连接和数据连接的实现与绑定
+            }
+        }
+    }
+    if(events[i].events&EPOLLOUT){// 处理可写事件
+        ;
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    void FTP_start(class ConnectionGroup group){
+        while(1){
+            struct epoll_event events[maxevents];
+            int n=epoll_wait(epfd,events,maxevents,-1);
+            if(n==-1){
+                perror("epoll_wait failed");
+                break;
+            }
+            for(int i=0;i<n;i++){
+                if(events[i].data.fd==server_fd){ // 客户端连接
+                    sockaddr_in client_addr{};
+                    socklen_t client_len=sizeof(client_addr);
+                    int connect_fd=accept(server_fd,(sockaddr*)&client_addr,&client_len);
+                    if(connect_fd==-1){
+                        perror("accept");
+                        continue;
+                    }
+    
+                    // 设置非阻塞模式
+                    fcntl(connect_fd,F_SETFL,fcntl(connect_fd,F_GETFL,0)|O_NONBLOCK);
+    
+                    // 注册客户端连接到 epoll
+                    ev.events=EPOLLIN|EPOLLET;
+                    ev.data.fd=connect_fd;
+                    if(epoll_ctl(epfd,EPOLL_CTL_ADD,connect_fd,&ev)==-1){
+                        perror("epoll_ctl");
+                        close(connect_fd);
+                    }
+                }else{    // 客户端
+                    if(events[i].events&(EPOLLERR|EPOLLRDHUP)){
+                        // 处理错误或连接关闭
+                        printf("Client error or disconnected: %d\n",events[i].data.fd);
+                        close(events[i].data.fd);
+                        epoll_ctl(epfd,EPOLL_CTL_DEL,events[i].data.fd,nullptr);
+                    }else if(events[i].events&EPOLLIN){// 处理可读事件
+                        char buf[1024];
+                        while(1){
+                        // memset(buf,0,sizeof(buf));
+                        ssize_t len=read(events[i].data.fd,buf,sizeof(buf));
+                            if(len<=0){
+                                if(len==0){ // 客户端主动关闭
+                                    printf("Client disconnected: %d\n",events[i].data.fd);
+                                }else{ // 连接出错
+                                    perror("read failed");
+                                }
+                                close(events[i].data.fd);
+                                epoll_ctl(epfd,EPOLL_CTL_DEL,events[i].data.fd,nullptr);
+                            }else{
+                                
+    
+                            
+                                int fd=events[i].data.fd;
+                                std::thread client_thread(handle_msg,fd,buf,group);
+                                //control_pool.enqueue(handle_client,client_fd);
+                                //?????
+    
+    
+                                // 线程中要实现
+    
+                                client_thread.detach();
+                    
+                                // 创建线程？
+                                // handle_msg(buf);
+                                //写个处理函数处理buf数组
+                                // ？？？？？
+    
+    
+    
+                    
+                                //控制连接和数据连接的实现与绑定
+                            }
+                        }
+                    }
+                }
+                // free???
+            }
+        }
+    }
