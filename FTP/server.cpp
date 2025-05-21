@@ -299,6 +299,9 @@ void FTP_init(){
     //记得close(epdf)
 }
     
+
+
+
 void FTP_start(class ConnectionGroup group){
     while(1){
         struct epoll_event events[maxevents];
