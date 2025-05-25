@@ -38,43 +38,110 @@ class ControlConnect{
         int list;
         int retr;
         int stor;
-        ControlConnect():pasv(0),list(0),retr(0),stor(0){
-            return;
+        ControlConnect(int fd,int n):control_fd(fd),pasv(0),list(0),retr(0),stor(0){
+        if(n==1) pasv=1;
+        if(n==2) list=1;
+        if(n==3) retr=1;
+        if(n==4) stor=1;
         }
-        //ControlConnect(int fd):control_fd(fd){
-           // ;// 其他初始化代码
-        //}
+        void set_msg(int n){
+            if(n==1) pasv=1;
+            if(n==2) list=1;
+            if(n==3) retr=1;
+            if(n==4) stor=1;
+        }
 };
     
 class DataConnect{
     public:
         int data_fd; // 数据连接的文件描述符
         DataConnect(int fd):data_fd(fd){
-            ;// 其他初始化代码
+            ;
         }
 };
+
 
 class ConnectionGroup{
     public:
         std::vector<ControlConnect> control_connections;
         std::vector<DataConnect> data_connections;
-        std::map<ControlConnect, DataConnect> connections;
-    
-        // void add_control_connection(int control_fd){
-        //     control_connections.emplace_back(control_fd);
-        // }
-        
-        // void add_data_connection(int data_fd){
-        //     data_connections.emplace_back(data_fd);
-        // }
+        std::unordered_map<int,int> data_to_control;
 
-        void add_connection(int control_fd,int data_fd){
-            control_connections.emplace_back(control_fd);
-            data_connections.emplace_back(data_fd);
-            connections.emplace(control_fd,data_fd);
+        void get_init_control(int fd,int n){ // 判断fd是否存在，存在就修改，不存在初始化
+
+            auto it=std::find_if(control_connections.begin(),control_connections.end(),[fd](const ControlConnect& conn){return conn.control_fd==fd;});
+        
+            if(it==control_connections.end()){
+            control_connections.emplace_back(fd,n);
+            }else{
+                // 修改参数
+                it->set_msg(n);
+            }
         }
 
+        void get_init_data(int data_fd){
+            data_connections.emplace_back(data_fd);
+        }
+
+        // 添加连接（control_fd 和 data_fd 关联）
+        void add_connection(int control_fd,int data_fd){
+
+            data_to_control[data_fd]=control_fd;  // 存储反向映射
+        }
+
+        // 通过 data_fd 查找 control_fd
+        int find_control_fd(int data_fd){
+            auto it=data_to_control.find(data_fd);
+            if(it!=data_to_control.end()){
+                return it->second;
+            }
+            return -1;  // 未找到
+        }
+
+        void remove_control_connection(int fd){
+            auto it=std::find_if(control_connections.begin(),control_connections.end(),[fd](const ControlConnect& conn){return conn.control_fd==fd;});
+        
+            if(it!=control_connections.end()){
+                control_connections.erase(it);  // 删除单个元素
+            }
+        
+            // 清理data_to_control中指向该control_fd的映射
+            for(auto it=data_to_control.begin();it!=data_to_control.end();){
+                if(it->second==fd){
+                    it=data_to_control.erase(it);  // 删除并返回下一个迭代器
+                }else{
+                    ++it;
+                }
+            }
+        }
+        
+        
+        
+
+
+
+
+        // 查找fd的所在容器函数实现
+
+        // ControlConnect get_control() const {
+        //     if (is_control && control_result.has_value()) {
+        //         return control_result.value();
+        //     }
+        //     throw std::runtime_error("Not a ControlConnect!");
+        // }
+        
+        // // 获取 DataConnect（如果存在）
+        // DataConnect get_data() const {
+        //     if (!is_control && data_result.has_value()) {
+        //         return data_result.value();
+        //     }
+        //     throw std::runtime_error("Not a DataConnect!");
+        // }
 };
+
+
+
+
 
 // struct epoll_event {
 //     uint32_t events;    // 发生的事件类型（如 EPOLLIN、EPOLLOUT）
@@ -129,8 +196,31 @@ void FTP_init(){
     //记得close(epdf)
 }
     
+// 数据连接处理函数
+void handle_pasv(int client_fd){
+    return;
+
+    // 创建线程
 
 
+}
+
+void handle_list(int client_fd){
+    return;
+}
+
+void handle_retr(int client_fd){
+    return;
+}
+
+void handle_stor(int client_fd){
+    return;
+}
+
+
+void handle_msg(class ConnectionGroup group){
+    ;
+}
 
 void handle_accept(int fd,class ConnectionGroup group){ // 控制连接的创建  线程中
     sockaddr_in client_addr{};
@@ -180,38 +270,33 @@ int get_port(int fd){
 }
 
 
-void handle_pasv(int client_fd){
-    return;
-}
-
-void handle_list(int client_fd){
-    return;
-}
-
-void handle_retr(int client_fd){
-    return;
-}
-
-void handle_stor(int client_fd){
-    return;
-}
 
 
-void handle_control_msg(char *buf,int client_fd){
+
+void handle_control_msg(char *buf,int client_fd,class ConnectionGroup group){
 {
     unique_lock<mutex> lock(mtx);
     if(strstr(buf,"PASV")!=NULL){ // 处理数据连接
-        //handle_pasv(client_fd);
+        group.get_init_control(client_fd,1);
+        
+        
+        handle_pasv(client_fd);
 
-//
+
+
+
 
     }else if(strstr(buf,"LIST")!=NULL){ // 获取文件列表
         //handle_list(client_fd);
+        group.get_init_control(client_fd,2);
     }else if(strstr(buf,"RETR")!=NULL){ // 文件下载
         //handle_retr(client_fd);
+        group.get_init_control(client_fd,3);
     }else if(strstr(buf,"STOR")!=NULL){ // 文件上传
         //handle_stor(client_fd);
+        group.get_init_control(client_fd,4);
     }else if(strstr(buf,"QUIT")!=NULL){ // 连接关闭
+        group.remove_control_connection(client_fd);
         epoll_ctl(epfd,EPOLL_CTL_DEL,client_fd,nullptr);
         close(client_fd);
     }else{ // 其他命令
@@ -260,7 +345,7 @@ void FTP_start(class ConnectionGroup group){
                     close(events[i].data.fd);
                     }else{
                         buf[len]='\0';
-                        auto future1=control_pool.enqueue(handle_control_msg,buf,fd);
+                        auto future1=control_pool.enqueue(handle_control_msg,buf,fd,group);
                         future1.get();
                     }
                 }else{
@@ -271,7 +356,7 @@ void FTP_start(class ConnectionGroup group){
 
 
 
-                    auto future2=data_pool.enqueue();
+                    auto future2=data_pool.enqueue(handle_msg,group);
                     future2.get();
                 }
             }
@@ -295,12 +380,6 @@ void FTP_start(class ConnectionGroup group){
 int main(){
     ConnectionGroup group;
     // 初始化 group
-
-
-
-
-
-
     FTP_init();
     FTP_start(group);
     close(server_fd);
