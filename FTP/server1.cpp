@@ -34,9 +34,16 @@ int server_fd;// 全局变量
 class ControlConnect{
     public:
         int control_fd; // 控制连接的文件描述符
-        ControlConnect(int fd):control_fd(fd){
-            ;// 其他初始化代码
+        int pasv;
+        int list;
+        int retr;
+        int stor;
+        ControlConnect():pasv(0),list(0),retr(0),stor(0){
+            return;
         }
+        //ControlConnect(int fd):control_fd(fd){
+           // ;// 其他初始化代码
+        //}
 };
     
 class DataConnect{
@@ -49,8 +56,8 @@ class DataConnect{
 
 class ConnectionGroup{
     public:
-        std::vector<ControlConnect> control_connects;
-        std::vector<DataConnect> data_connects;
+        std::vector<ControlConnect> control_connections;
+        std::vector<DataConnect> data_connections;
         std::map<ControlConnect, DataConnect> connections;
     
         // void add_control_connection(int control_fd){
@@ -69,186 +76,10 @@ class ConnectionGroup{
 
 };
 
-
-
-
-
-
-
 // struct epoll_event {
 //     uint32_t events;    // 发生的事件类型（如 EPOLLIN、EPOLLOUT）
 //     epoll_data_t data;  // 用户自定义数据（通常存储 FD）
 // };
-
-
-
-// void handle_client(int control_fd) {
-//     // 处理控制命令的逻辑
-// }
-
-// void handle_data_transfer(int data_fd) {
-//     // 处理文件上传或下载的逻辑
-// }
-
-// void handle_pasv_command(int control_fd, threadpool& data_pool) {
-//     // 选择随机端口并监听
-//     int data_port = choose_random_port();
-//     listen_on_port(data_port);
-    
-//     // 返回PASV响应给客户端
-//     send_response(control_fd, data_port);
-    
-//     // 等待客户端连接
-//     int data_fd = accept_connection(data_port);
-    
-//     // 从数据连接线程池获取线程处理数据传输
-//     data_pool.enqueue(handle_data_transfer, data_fd);
-// }
-
-
-
-// void send_response(int client_fd,const string& message){
-//     string response=message+"\r\n"; // FTP协议的CRLF结尾
-//     send(client_fd,response.c_str(),response.size(),0); // 发送响应
-// }
-
-// void handle_pasv(control_fd){   
-// ;
-// }
-// void handle_list(control_fd){
-// ;
-// }
-// void handle_retr(control_fd){
-// ;
-// }
-// void handle_stor(control_fd){
-// ;
-// }
-
-
-// void handle_client(int control_fd){
-//     char buffer[SIZE];
-    
-//     while(1){
-//         memset(buffer,0,sizeof(buffer));
-//         int received;
-//         if((received=recv(control_fd,buffer,sizeof(buffer)-1,0))<0){
-//             perror("recv failed");
-//         }        
-//         if(buffer=="PASV"){
-//             handle_pasv(control_fd);
-//         }else if(buffer=="LIST"){
-//             handle_list(control_fd);
-//         }else if(buffer=="RETR"){
-//             handle_retr(control_fd);
-//         }else if(buffer=="STOR"){
-//             handle_stor(control_fd);
-//         }else if(buffer=="QUIT"){
-//             send_response(control_fd,"221 Goodbye.");
-//             break;
-//         }else {
-//             send_response(control_fd,"500 Unknown command.");
-//         }
-
-//?????????????????????
-
-    //}
-    
-    // 关闭控制连接
-    //close(control_fd);
-//}
-
-//???????????????????????????????????????
-
-
-// class FTP{
-//     public:
-//     FTP(){
-
-
-//     }
-    
-
-
-//     }
-//     ~FTP(){
-//         close(epdf);
-//     }
-    
-
-void handle_PASV(struct FtpClient* client) {
-
-	if (client->_data_socket > 0) {
-		close(client->_data_socket);
-		client->_data_socket = -1;
-	}
-	if (client->_data_server_socket > 0) {
-		close(client->_data_server_socket);
-	}
-	client->_data_server_socket = socket(AF_INET, SOCK_STREAM, 0);
-	if (client->_data_server_socket < 0) {
-		perror("opening socket error");
-		send_msg(client->_client_socket, "426 pasv failure\r\n");
-		return;
-	}
-	struct sockaddr_in server;
-	server.sin_family = AF_INET;
-	server.sin_addr.s_addr = inet_addr(client->_ip);
-	server.sin_port = htons(0);
-	if (bind(client->_data_server_socket, (struct sockaddr*) &server,
-			sizeof(struct sockaddr)) < 0) {
-		perror("binding error");
-		send_msg(client->_client_socket, "426 pasv failure\r\n");
-		return;
-	}
-	show_log("server is estabished. Waiting for connnect...");
-	if (listen(client->_data_server_socket, 1) < 0) {
-		perror("listen error...\r\n");
-		send_msg(client->_client_socket, "426 pasv failure\r\n");
-	}
-	struct sockaddr_in file_addr;
-	socklen_t file_sock_len = sizeof(struct sockaddr);
-	getsockname(client->_data_server_socket, (struct sockaddr*) &file_addr,
-			&file_sock_len);
-	show_log(client->_ip);
-	int port = ntohs(file_addr.sin_port);
-	show_log(parseInt2String(port));
-	char* msg = _transfer_ip_port_str(client->_ip, port);
-	char buf[200];
-	strcpy(buf, "227 Entering Passive Mode (");
-	strcat(buf, msg);
-	strcat(buf, ")\r\n");
-	send_msg(client->_client_socket, buf);
-	free(msg);
-
-}
-
-// 控制连接线程
-void handle_msg(int fd,char *buf,class ConnectionGroup group){
-
-
-        while(1){
-        if(*buf=="PASV"){
-            handle_pasv(fd);
-        }else if(*buf=="LIST"){
-            handle_list(fd);
-        }else if(*buf=="RETR"){
-            handle_retr(fd);
-        }else if(*buf=="STOR"){
-            handle_stor(fd);
-        }else if(*buf=="QUIT"){
-            send_response(fd,"221 Goodbye.");
-            break;
-        }else{
-            send_response(fd,"500 Unknown command.");
-        }    
-
-    }
-
-
-
-}
-
 
 
 void FTP_init(){
@@ -288,9 +119,8 @@ void FTP_init(){
         return;
     }
     
-    
     ev.data.fd=server_fd;
-    ev.events=EPOLLIN|EPOLLET;
+    ev.events=EPOLLIN|EPOLLET|EPOLLRDHUP|EPOLLERR;
     if(epoll_ctl(epfd,EPOLL_CTL_ADD,server_fd,&ev)==-1){
         perror("epoll_ctl failed");
         return;
@@ -299,6 +129,103 @@ void FTP_init(){
     //记得close(epdf)
 }
     
+
+
+
+void handle_accept(int fd,class ConnectionGroup group){ // 控制连接的创建  线程中
+    sockaddr_in client_addr{};
+    socklen_t client_len=sizeof(client_addr);
+    int connect_fd=accept(server_fd,(sockaddr*)&client_addr,&client_len);
+    if(connect_fd==-1){
+        perror("accept");
+        return;
+    }
+
+    // 设置非阻塞模式
+    fcntl(connect_fd,F_SETFL,fcntl(connect_fd,F_GETFL,0)|O_NONBLOCK);
+
+    // 注册客户端连接到 epoll
+    ev.events=EPOLLIN|EPOLLET|EPOLLRDHUP|EPOLLERR;
+    ev.data.fd=connect_fd;
+    if(epoll_ctl(epfd,EPOLL_CTL_ADD,connect_fd,&ev)==-1){
+        perror("epoll_ctl");
+        close(connect_fd);
+    }
+
+
+    //处理控制连接和数据连接实现
+    // ?????????????????????
+
+
+
+
+
+
+
+
+
+}
+
+
+
+int get_port(int fd){
+    struct sockaddr_in addr;
+    socklen_t addr_len=sizeof(addr);
+
+    if(getsockname(fd,(struct sockaddr *)&addr,&addr_len)==-1){
+        perror("getsockname failed");
+        return -1;
+    }
+    return ntohs(addr.sin_port);
+}
+
+
+void handle_pasv(int client_fd){
+    return;
+}
+
+void handle_list(int client_fd){
+    return;
+}
+
+void handle_retr(int client_fd){
+    return;
+}
+
+void handle_stor(int client_fd){
+    return;
+}
+
+
+void handle_control_msg(char *buf,int client_fd){
+{
+    unique_lock<mutex> lock(mtx);
+    if(strstr(buf,"PASV")!=NULL){ // 处理数据连接
+        //handle_pasv(client_fd);
+
+//
+
+    }else if(strstr(buf,"LIST")!=NULL){ // 获取文件列表
+        //handle_list(client_fd);
+    }else if(strstr(buf,"RETR")!=NULL){ // 文件下载
+        //handle_retr(client_fd);
+    }else if(strstr(buf,"STOR")!=NULL){ // 文件上传
+        //handle_stor(client_fd);
+    }else if(strstr(buf,"QUIT")!=NULL){ // 连接关闭
+        epoll_ctl(epfd,EPOLL_CTL_DEL,client_fd,nullptr);
+        close(client_fd);
+    }else{ // 其他命令
+        send(client_fd,"500 Unknown command\r\n",21,0);
+    }
+}
+}
+
+
+
+
+
+
+
 void FTP_start(class ConnectionGroup group){
     while(1){
         struct epoll_event events[maxevents];
@@ -308,13 +235,57 @@ void FTP_start(class ConnectionGroup group){
             break;
         }
         for(int i=0;i<n;i++){
+            if(events[i].events&(EPOLLERR|EPOLLRDHUP)){ // 处理错误或连接关闭
+                printf("Client error or disconnected: %d\n",events[i].data.fd);
+                epoll_ctl(epfd,EPOLL_CTL_DEL,events[i].data.fd,nullptr);
+                close(events[i].data.fd);
+                continue;
+            }
+            if(events[i].data.fd==server_fd){ // 客户端连接
+                std::thread client_thread(handle_accept,server_fd,group);
+                client_thread.detach();
+            }
+            else{
+                int fd=events[i].data.fd;
+                if(get_port(fd)==2100){
+                    char buf[1024];
+                    ssize_t len=read(events[i].data.fd,buf,sizeof(buf)-1);
+                    if(len<=0){
+                        if(len==0){ // 客户端主动关闭
+                            printf("Client disconnected: %d\n",events[i].data.fd);
+                        }else{ // 连接出错
+                            perror("read failed");
+                        }
+                    epoll_ctl(epfd,EPOLL_CTL_DEL,events[i].data.fd,nullptr);
+                    close(events[i].data.fd);
+                    }else{
+                        buf[len]='\0';
+                        auto future1=control_pool.enqueue(handle_control_msg,buf,fd);
+                        future1.get();
+                    }
+                }else{
+                    ;// 数据连接
 
+
+
+
+
+
+                    auto future2=data_pool.enqueue();
+                    future2.get();
+                }
+            }
         }
     }
 }
 
-
 //epoll中的文件描述符关闭
+
+
+
+
+
+
 
 
 
@@ -338,265 +309,12 @@ int main(){
     // epdf  server——fd   event封装
 }
 
-
-
-
-// 客户端
-if(events[i].events&EPOLLIN){// 处理可读事件
-
-
-
-
-        if(events[i].data.fd==server_fd){ // 客户端连接
-
-            // 创建线程
-        std::thread myThread([epfd,&group,&events]() {
-            sockaddr_in client_addr{};
-            socklen_t client_len=sizeof(client_addr);
-            int connect_fd=accept(server_fd,(sockaddr*)&client_addr,&client_len);
-            if(connect_fd==-1){
-                perror("accept");
-                continue;
-            }
-        
-            // 设置非阻塞模式
-            fcntl(connect_fd,F_SETFL,fcntl(connect_fd,F_GETFL,0)|O_NONBLOCK);
-        
-            // 注册客户端连接到 epoll
-            ev.events=EPOLLIN|EPOLLET;
-            ev.data.fd=connect_fd;
-            if(epoll_ctl(epfd,EPOLL_CTL_ADD,connect_fd,&ev)==-1){
-                perror("epoll_ctl");
-                close(connect_fd);
-            }
-
-
-            });
-
-            
-        }
-
-        char buf[1024];
-        while(1){
-        // memset(buf,0,sizeof(buf));
-        ssize_t len=read(events[i].data.fd,buf,sizeof(buf));
-            if(len<=0){
-                if(len==0){ // 客户端主动关闭
-                    printf("Client disconnected: %d\n",events[i].data.fd);
-                }else{ // 连接出错
-                    perror("read failed");
-                }
-                close(events[i].data.fd);
-                epoll_ctl(epfd,EPOLL_CTL_DEL,events[i].data.fd,nullptr);
-            }else{
-                
-
-            
-                int fd=events[i].data.fd;
-                std::thread client_thread(handle_msg,fd,buf,group);
-                //control_pool.enqueue(handle_client,client_fd);
-                //?????
-
-
-                // 线程中要实现
-
-                client_thread.detach();
-    
-                // 创建线程？
-                // handle_msg(buf);
-                //写个处理函数处理buf数组
-                // ？？？？？
-
-
-
-    
-                //控制连接和数据连接的实现与绑定
-            }
-        }
-    }
-    if(events[i].events&EPOLLOUT){// 处理可写事件
-        ;
-    }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-void handle_accept(){ // 控制连接的创建
-    sockaddr_in client_addr{};
-        socklen_t client_len=sizeof(client_addr);
-        int connect_fd=accept(server_fd,(sockaddr*)&client_addr,&client_len);
-        if(connect_fd==-1){
-            perror("accept");
-            continue;
-        }
-
-        // 设置非阻塞模式
-        fcntl(connect_fd,F_SETFL,fcntl(connect_fd,F_GETFL,0)|O_NONBLOCK);
-
-        // 注册客户端连接到 epoll
-        ev.events=EPOLLIN|EPOLLET|EPOLLRDHUP|EPOLLERR;
-        ev.data.fd=connect_fd;
-        if(epoll_ctl(epfd,EPOLL_CTL_ADD,connect_fd,&ev)==-1){
-            perror("epoll_ctl");
-            close(connect_fd);
-        }
-
-
-
-        // ?????????????????????
-}
-
-
-
-int get_port(int fd,class ConnectionGroup group){
-    struct sockaddr_in addr;
-    socklen_t addr_len=sizeof(addr);
-
-    if(getsockname(fd,(struct sockaddr *)&addr,&addr_len)==-1){
-        perror("getsockname failed");
-        return -1;
-    }
-    return ntohs(addr.sin_port);
-}
-
-
-
-
-void FTP_start(class ConnectionGroup group){
-    while(1){
-        struct epoll_event events[maxevents];
-        int n=epoll_wait(epfd,events,maxevents,-1);
-        if(n==-1){
-            perror("epoll_wait failed");
-            break;
-        }
-        for(int i=0;i<n;i++){
-            if(events[i].events&(EPOLLERR|EPOLLRDHUP)){ // 处理错误或连接关闭
-                printf("Client error or disconnected: %d\n",events[i].data.fd);
-                close(events[i].data.fd);
-                epoll_ctl(epfd,EPOLL_CTL_DEL,events[i].data.fd,nullptr);
-                continue;
-            }
-            if(events[i].data.fd==server_fd){ // 客户端连接
-                std::thread client_thread(handle_accept,fd,group);
-                client_thread.detach();
-            }
-            else{
-                if(get_port(events[i].data.fd)==2100){
-                    // 控制连接
-                }else{
-                    // 数据连接
-                }
-            }
-        }
-    }
-}
-
-
-    if(events[i].data.fd==server_fd){ // 客户端连接
-        sockaddr_in client_addr{};
-        socklen_t client_len=sizeof(client_addr);
-        int connect_fd=accept(server_fd,(sockaddr*)&client_addr,&client_len);
-        if(connect_fd==-1){
-            perror("accept");
-            continue;
-        }
-
-        // 设置非阻塞模式
-        fcntl(connect_fd,F_SETFL,fcntl(connect_fd,F_GETFL,0)|O_NONBLOCK);
-
-        // 注册客户端连接到 epoll
-        ev.events=EPOLLIN|EPOLLET;
-        ev.data.fd=connect_fd;
-        if(epoll_ctl(epfd,EPOLL_CTL_ADD,connect_fd,&ev)==-1){
-            perror("epoll_ctl");
-            close(connect_fd);
-        }
-    }else{    // 客户端
-        if(events[i].events&(EPOLLERR|EPOLLRDHUP)){
-            // 处理错误或连接关闭
-            printf("Client error or disconnected: %d\n",events[i].data.fd);
-            close(events[i].data.fd);
-            epoll_ctl(epfd,EPOLL_CTL_DEL,events[i].data.fd,nullptr);
-        }else if(events[i].events&EPOLLIN){// 处理可读事件
-            
-            char buf[1024];
-            while(1){
-            // memset(buf,0,sizeof(buf));
-            ssize_t len=read(events[i].data.fd,buf,sizeof(buf));
-                if(len<=0){
-                    if(len==0){ // 客户端主动关闭
-                        printf("Client disconnected: %d\n",events[i].data.fd);
-                    }else{ // 连接出错
-                        perror("read failed");
-                    }
-                    close(events[i].data.fd);
-                    epoll_ctl(epfd,EPOLL_CTL_DEL,events[i].data.fd,nullptr);
-                }else{
-                    
-
-                
-                    int fd=events[i].data.fd;
-                    std::thread client_thread(handle_msg,fd,buf,group);
-                    //control_pool.enqueue(handle_client,client_fd);
-                    //?????
-
-
-                    // 线程中要实现
-
-                    client_thread.detach();
-        
-                    // 创建线程？
-                    // handle_msg(buf);
-                    //写个处理函数处理buf数组
-                    // ？？？？？
-
-
-
-        
-                    //控制连接和数据连接的实现与绑定
-                }
-            }
-        }else{
-            continue;
-        }
-    }
-    // free???
+// 线程池设计
+// 控制连接线程池:
+
+// 用于处理客户端的控制连接和命令（如 USER、PASS、PASV 等）。
+// 每当有新的控制连接时，从这个线程池中获取一个线程来处理。
+// 数据连接线程池:
+
+// 用于处理数据传输（如文件上传和下载）。
+// 当在控制连接中接收到 PASV 命令并建立数据连接后，从这个线程池中获取一个线程来处理数据传输。

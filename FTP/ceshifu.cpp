@@ -381,37 +381,6 @@ void FTP_start(class ConnectionGroup group){
 // .??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
 
 
-void FTP_start(class ConnectionGroup group){
-    while(1){
-        struct epoll_event events[maxevents];
-        int n=epoll_wait(epfd,events,maxevents,-1);
-        if(n==-1){
-            perror("epoll_wait failed");
-            break;
-        }
-        for(int i=0;i<n;i++){
-            if(events[i].events&(EPOLLERR|EPOLLRDHUP)){ // 处理错误或连接关闭
-                printf("Client error or disconnected: %d\n",events[i].data.fd);
-                close(events[i].data.fd);
-                epoll_ctl(epfd,EPOLL_CTL_DEL,events[i].data.fd,nullptr);
-                continue;
-            }
-            if(events[i].data.fd==server_fd){ // 客户端连接
-                std::thread client_thread(handle_accept,fd,group);
-                client_thread.detach();
-            }
-            else{
-                if(get_port(events[i].data.fd)==2100){
-                    // 控制连接
-                }else{
-                    // 数据连接
-                }
-            }
-        }
-    }
-}
-
-
 
     if(events[i].data.fd==server_fd){ // 客户端连接
         sockaddr_in client_addr{};
