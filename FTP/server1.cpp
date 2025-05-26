@@ -25,10 +25,13 @@ threadpool control_pool(10); // 控制连接线程池
 threadpool data_pool(10);     // 数据连接线程池
 
 // ？？？？？？？？？？？？？？？？？？？？？？？？？
+
+// condition_variable condition;
 struct epoll_event ev;
 std::mutex mtx; // 互斥锁
 int epfd;
 int server_fd;// 全局变量
+
 //可以扔到类里面封装？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？/
 
 class ControlConnect{
@@ -196,9 +199,13 @@ void FTP_init(){
     //记得close(epdf)
 }
     
-// 数据连接处理函数
+// 数据连接创建
 void handle_pasv(int client_fd){
-    return;
+    
+    // 用notify_one唤醒  哪里唤醒呢。。。
+
+
+
 
     // 创建线程
 
@@ -222,7 +229,7 @@ void handle_msg(class ConnectionGroup group){
     ;
 }
 
-void handle_accept(int fd,class ConnectionGroup group){ // 控制连接的创建  线程中
+void handle_accept(int fd,class ConnectionGroup group){ // 控制连接的创建
     sockaddr_in client_addr{};
     socklen_t client_len=sizeof(client_addr);
     int connect_fd=accept(server_fd,(sockaddr*)&client_addr,&client_len);
@@ -242,17 +249,23 @@ void handle_accept(int fd,class ConnectionGroup group){ // 控制连接的创建
         close(connect_fd);
     }
 
-
+    while()// fd是否存在？？？？
+    
     //处理控制连接和数据连接实现
     // ?????????????????????
 
+    // 等待到通知？？？this->condition.wait(lock,[this]{return !this->tasks.empty()||this->stop;});
 
 
 
 
 
+    
 
 
+
+
+    // 控制线程要干啥
 
 }
 
@@ -288,6 +301,9 @@ void handle_control_msg(char *buf,int client_fd,class ConnectionGroup group){
 
     }else if(strstr(buf,"LIST")!=NULL){ // 获取文件列表
         //handle_list(client_fd);
+
+        // 判断pasv是否建立???
+
         group.get_init_control(client_fd,2);
     }else if(strstr(buf,"RETR")!=NULL){ // 文件下载
         //handle_retr(client_fd);
@@ -352,11 +368,12 @@ void FTP_start(class ConnectionGroup group){
                     ;// 数据连接
 
 
+                    //fd转换到client_fd
 
 
 
 
-                    auto future2=data_pool.enqueue(handle_msg,group);
+                    auto future2=data_pool.enqueue(handle_msg,group,client_fd,fd);
                     future2.get();
                 }
             }

@@ -167,3 +167,69 @@ public:
         throw std::out_of_range("DataConnect not found");
     }
 };
+
+
+
+
+char recvbuf[MAXBUF];
+        char sendbuf[MAXBUF];
+        ssize_t n;
+        ctrl_args *new_arg = (ctrl_args*) args;
+
+        while ((n = recv(new_arg->fd, recvbuf, MAXBUF - 1, MSG_DONTWAIT)) != 0){ 
+            recvbuf[n] = '\0';
+            if(errno == EAGAIN || errno == EWOULDBLOCK){
+                n = 0;
+                break;
+            }
+        }
+
+        if (n == 0) {
+            if(strcmp(recvbuf,"PASV") == 0){
+                char portnum_str[MAXBUF];
+                char *result = new char[MAXBUF];
+                sockaddr_storage addr;
+                socklen_t len = sizeof(sockaddr_storage);
+
+                srand(time(NULL));
+                int listen_data_portnum = rand()%40000+1024;
+                sprintf(portnum_str,"%d",listen_data_portnum);
+                int listen_data_fd = inetlisten((const char*)portnum_str);
+                while(listen_data_fd == -1){
+                    perror("inetlisten");
+                    listen_data_portnum = rand()%40000+1024;
+                    sprintf(portnum_str,"%d",listen_data_portnum);
+                    listen_data_fd = inetlisten((const char*)portnum_str);
+                }
+                set_nonblocking(listen_data_fd);
+
+                struct epoll_event ev;
+                ev.data.fd = listen_data_fd;
+                ev.events = EPOLLIN | EPOLLET;
+                epoll_ctl(new_arg->epfd,EPOLL_CTL_ADD,listen_data_fd,&ev);
+                
+                getsockname(listen_data_fd,(sockaddr*)&addr,&len);
+                address_str_portnum(result,MAXBUF,(sockaddr*)&addr,len) == NULL;
+                const char delimiter[5] = "().,";
+                char *token;
+                char **res_token = new char*[10];
+                for(int i=0;i<10;i++){
+                    res_token[i] = new char[10];
+                }
+                int cnt = 0;
+                cout << result << endl;
+                token = strtok(result,delimiter);
+                while(token != NULL){
+                    res_token[cnt] = token;
+                    token = strtok(NULL,delimiter);
+                    cnt++;
+                }
+                sprintf(result,"(%s,%s,%s,%s,%d,%d)",res_token[0],res_token[1],res_token[2],res_token[3],atoi(res_token[4])/256,atoi(res_token[4])%256);
+                sprintf(sendbuf,"%s %s","227 entering passive mode",result);
+                send(new_arg->fd,sendbuf,sizeof(sendbuf),0);
+
+                memset(sendbuf,0,sizeof(sendbuf));
+                memset(recvbuf,0,MAXBUF);
+                delete[] res_token;
+                free(result);
+            }
