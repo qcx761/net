@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <ctime>
 #include <thread>
 #include "threadpool.hpp"
 
@@ -27,7 +28,6 @@ threadpool data_pool(10);     // 数据连接线程池
 // ？？？？？？？？？？？？？？？？？？？？？？？？？
 
 // condition_variable condition;
-struct epoll_event ev;
 std::mutex mtx; // 互斥锁
 int epfd;
 int server_fd;// 全局变量
@@ -151,6 +151,16 @@ class ConnectionGroup{
 //     epoll_data_t data;  // 用户自定义数据（通常存储 FD）
 // };
 
+int get_port(int fd){
+    struct sockaddr_in addr;
+    socklen_t addr_len=sizeof(addr);
+
+    if(getsockname(fd,(struct sockaddr *)&addr,&addr_len)==-1){
+        perror("getsockname failed");
+        return -1;
+    }
+    return ntohs(addr.sin_port);
+}
 
 void FTP_init(){
     int client_fd;
@@ -188,7 +198,8 @@ void FTP_init(){
         perror("epoll_create failed");
         return;
     }
-    
+
+    struct epoll_event ev;
     ev.data.fd=server_fd;
     ev.events=EPOLLIN|EPOLLET|EPOLLRDHUP|EPOLLERR;
     if(epoll_ctl(epfd,EPOLL_CTL_ADD,server_fd,&ev)==-1){
@@ -199,18 +210,86 @@ void FTP_init(){
     //记得close(epdf)
 }
     
+
+
+
+
 // 数据连接创建
 void handle_pasv(int client_fd){
+
+    //     服务端控制线程接收到 PASV 请求后，创建一个数据传输线程，并将生成的端口号告知客户端控制线程，
+    //返回 227 entering passive mode (h1,h2,h3,h4,p1,p2)，其中端口号为 p1*256+p2，IP 地址为 h1.h2.h3.h4。
     
-    // 用notify_one唤醒  哪里唤醒呢。。。
+    // 假设服务器的 IP 地址为 192.168.1.1，生成的端口号为 5000
+    // 那么返回的响应将是：227 entering passive mode (192,168,1,1,19,136)
+    // 其中 19 和 136 分别是 5000 的高位和低位字节（5000 = 19*256 + 136）
+    
+        
+        srand(time(NULL));
+        int port=rand()%40000+1024;
+        int p1=port/256;
+        int p2=port%256;
+        char str[6];
+        sprintf(str,"%d",port);
+
+        int listen_fd=socket(AF_INET,SOCK_STREAM,0);
+        if(listen_fd==-1){
+            perror("socket failed");
+            return;
+        }
+
+        struct sockaddr_in addr{};
+        addr.sin_family=AF_INET;
+        addr.sin_addr.s_addr=INADDR_ANY;
+        addr.sin_port=htons(port);
+        
+        if(bind(listen_fd,(struct sockaddr*)&addr,sizeof(addr))==-1){
+            perror("bind failed");
+            close(listen_fd);
+            return;
+        }
+
+        if(listen(listen_fd,5)==-1){
+            perror("listen failed");
+            close(listen_fd);
+            return;
+        }
+        
+        fcntl(listen_fd,F_SETFL,O_NONBLOCK);
+
+        struct epoll_event ev;
+        ev.data.fd=listen_fd;
+        ev.events=EPOLLIN|EPOLLET|EPOLLRDHUP|EPOLLERR;
+        if(epoll_ctl(epfd,EPOLL_CTL_ADD,server_fd,&ev)==-1){
+            perror("epoll_ctl failed");
+            return;
+        }
+
+        socklen_t len=sizeof(addr);
+        getsockname(listen_fd,(struct sockaddr*)&addr,&len);
+        
+
+
+        // struct sockaddr_storage addr;
+        // socklen_t len=sizeof(sockaddr_storage);
+        // getsockname(listen_fd,(sockaddr*)&addr,&len);
+        // 用notify_one唤醒  哪里唤醒呢。。。
+    
+    
+    
+    
+        // 创建线程
+    
+        //condition.wait(lock,[this]{return !this->tasks.empty()||this->stop;});
+    
+    
+        // 在这里面查找控制连接的传递的参数吗
+    
+    }
 
 
 
 
-    // 创建线程
-
-
-}
 
 void handle_list(int client_fd){
     return;
@@ -242,6 +321,7 @@ void handle_accept(int fd,class ConnectionGroup group){ // 控制连接的创建
     fcntl(connect_fd,F_SETFL,fcntl(connect_fd,F_GETFL,0)|O_NONBLOCK);
 
     // 注册客户端连接到 epoll
+    struct epoll_event ev;
     ev.events=EPOLLIN|EPOLLET|EPOLLRDHUP|EPOLLERR;
     ev.data.fd=connect_fd;
     if(epoll_ctl(epfd,EPOLL_CTL_ADD,connect_fd,&ev)==-1){
@@ -271,16 +351,7 @@ void handle_accept(int fd,class ConnectionGroup group){ // 控制连接的创建
 
 
 
-int get_port(int fd){
-    struct sockaddr_in addr;
-    socklen_t addr_len=sizeof(addr);
 
-    if(getsockname(fd,(struct sockaddr *)&addr,&addr_len)==-1){
-        perror("getsockname failed");
-        return -1;
-    }
-    return ntohs(addr.sin_port);
-}
 
 
 
@@ -291,14 +362,7 @@ void handle_control_msg(char *buf,int client_fd,class ConnectionGroup group){
     unique_lock<mutex> lock(mtx);
     if(strstr(buf,"PASV")!=NULL){ // 处理数据连接
         group.get_init_control(client_fd,1);
-        
-        
-        handle_pasv(client_fd);
-
-
-
-
-
+        std::thread client_thread(handle_pasv,client_fd);
     }else if(strstr(buf,"LIST")!=NULL){ // 获取文件列表
         //handle_list(client_fd);
 
@@ -371,9 +435,9 @@ void FTP_start(class ConnectionGroup group){
                     //fd转换到client_fd
 
 
+                    // 实现数据传输要放在哪
 
-
-                    auto future2=data_pool.enqueue(handle_msg,group,client_fd,fd);
+                    auto future2=data_pool.enqueue(handle_msg,group,client_fd,fd); // 参数还要修改
                     future2.get();
                 }
             }

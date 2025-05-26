@@ -233,3 +233,339 @@ char recvbuf[MAXBUF];
                 delete[] res_token;
                 free(result);
             }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            void handle_pasv_request(int client_fd, const std::string& client_ip) {
+                // 1. 计算端口号（假设随机生成 5000）
+                int port = 5000;
+                uint8_t p1 = port / 256;
+                uint8_t p2 = port % 256;
+            
+                // 2. 创建数据传输线程
+                std::thread data_thread([client_ip, port]() {
+                    // 2.1 监听数据端口
+                    int data_fd = socket(AF_INET, SOCK_STREAM, 0);
+                    sockaddr_in data_addr{};
+                    data_addr.sin_family = AF_INET;
+                    data_addr.sin_port = htons(port);
+                    inet_pton(AF_INET, client_ip.c_str(), &data_addr.sin_addr);
+            
+                    bind(data_fd, (sockaddr*)&data_addr, sizeof(data_addr));
+                    listen(data_fd, 1);
+            
+                    // 2.2 等待客户端连接（简化版）
+                    sockaddr_in client_data_addr{};
+                    socklen_t client_len = sizeof(client_data_addr);
+                    int client_data_fd = accept(data_fd, (sockaddr*)&client_data_addr, &client_len);
+            
+                    // 2.3 处理数据传输（如文件传输）
+                    // ...
+                });
+            
+                data_thread.detach();  // 或者使用线程池管理
+            
+                // 3. 返回 227 响应
+                std::string response = "227 entering passive mode (" +
+                                       client_ip + "," +
+                                       std::to_string(p1) + "," +
+                                       std::to_string(p2) + ")\r\n";
+                send(client_fd, response.c_str(), response.size(), 0);
+            }
+
+
+
+
+
+                char portnum_str[MAXBUF];
+                char* result = new char[MAXBUF];
+                sockaddr_storage addr;
+                socklen_t len = sizeof(sockaddr_storage);
+            
+                // 1. 随机选择数据端口（避免冲突）
+                int listen_data_portnum;
+                int max_retries = 10;
+                int retries = 0;
+                int listen_data_fd = -1;
+            
+                while (listen_data_fd == -1 && retries < max_retries) {
+                    srand(time(NULL) + retries);  // 增加随机性
+                    listen_data_portnum = rand() % 40000 + 1024;
+                    sprintf(portnum_str, "%d", listen_data_portnum);
+                    listen_data_fd = inetlisten(portnum_str);
+                    retries++;
+                }
+            
+                if (listen_data_fd == -1) {
+                    send(new_arg->fd, "425 Cannot open data connection.\r\n", 30, 0);
+                    delete[] result;
+                    return;
+                }
+            
+                set_nonblocking(listen_data_fd);
+            
+                // 2. 注册到 epoll
+                struct epoll_event ev;
+                ev.data.fd = listen_data_fd;
+                ev.events = EPOLLIN | EPOLLET;
+                epoll_ctl(new_arg->epfd, EPOLL_CTL_ADD, listen_data_fd, &ev);
+            
+                // 3. 获取本地 IP 和端口
+                if (getsockname(listen_data_fd, (sockaddr*)&addr, &len) == -1) {
+                    perror("getsockname");
+                    send(new_arg->fd, "425 Cannot get local address.\r\n", 32, 0);
+                    close(listen_data_fd);
+                    delete[] result;
+                    return;
+                }
+            
+                if (address_str_portnum(result, MAXBUF, (sockaddr*)&addr, len) == NULL) {
+                    send(new_arg->fd, "425 Cannot format address.\r\n", 28, 0);
+                    close(listen_data_fd);
+                    delete[] result;
+                    return;
+                }
+            
+                // 4. 构造 227 响应
+                const char delimiter[5] = "().,";
+                char* token;
+                char** res_token = new char*[10];
+                for (int i = 0; i < 10; i++) {
+                    res_token[i] = new char[10];
+                }
+                int cnt = 0;
+                token = strtok(result, delimiter);
+                while (token != NULL && cnt < 10) {
+                    res_token[cnt] = token;
+                    token = strtok(NULL, delimiter);
+                    cnt++;
+                }
+            
+                // 确保 res_token 有足够数据
+                if (cnt < 5) {
+                    send(new_arg->fd, "425 Invalid address format.\r\n", 29, 0);
+                    for (int i = 0; i < 10; i++) delete[] res_token[i];
+                    delete[] res_token;
+                    close(listen_data_fd);
+                    delete[] result;
+                    return;
+                }
+            
+                int p1 = atoi(res_token[4]) / 256;
+                int p2 = atoi(res_token[4]) % 256;
+            
+                // 构造 227 响应
+                char* formatted_response = new char[MAXBUF];
+                snprintf(formatted_response, MAXBUF, "(%s,%s,%s,%s,%d,%d)", 
+                         res_token[0], res_token[1], res_token[2], res_token[3], p1, p2);
+            
+                char* sendbuf = new char[MAXBUF * 2];  // 确保足够大
+                snprintf(sendbuf, MAXBUF * 2, "227 entering passive mode %s", formatted_response);
+            
+                send(new_arg->fd, sendbuf, strlen(sendbuf), 0);
+            
+                // 清理
+                for (int i = 0; i < 10; i++) delete[] res_token[i];
+                delete[] res_token;
+                delete[] formatted_response;
+                delete[] sendbuf;
+                memset(recvbuf, 0, MAXBUF);
+            }
+
+
+
+
+
+
+
+
+
+
+
+
+    int sockfd;
+    struct sockaddr_in server_addr,actual_addr;
+    socklen_t addr_len = sizeof(actual_addr);
+
+    // 创建套接字
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd == -1) {
+        perror("socket");
+        exit(EXIT_FAILURE);
+    }
+
+    // 配置服务器地址
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;  // 绑定到所有可用的网络接口
+    server_addr.sin_port = htons(port);       // 绑定到 8080 端口
+
+    // 绑定套接字
+    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+        perror("bind");
+        close(sockfd);
+        exit(EXIT_FAILURE);
+    }
+
+    // 获取实际绑定的地址
+    if (getsockname(sockfd, (struct sockaddr *)&actual_addr, &addr_len) == -1) {
+        perror("getsockname");
+        close(sockfd);
+        exit(EXIT_FAILURE);
+    }
+
+    // 打印绑定的 IP 和端口
+    char ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &actual_addr.sin_addr, ip, INET_ADDRSTRLEN);
+    printf("Bound to IP: %s, Port: %d\n", ip, ntohs(actual_addr.sin_port));
+
+    close(sockfd);
+    return 0;
+
+
+
+
+
+
+
+    // 数据连接创建
+void handle_pasv(int client_fd){
+    
+    //     服务端控制线程接收到 PASV 请求后，创建一个数据传输线程，并将生成的端口号告知客户端控制线程，
+    //返回 227 entering passive mode (h1,h2,h3,h4,p1,p2)，其中端口号为 p1*256+p2，IP 地址为 h1.h2.h3.h4。
+    
+    // 假设服务器的 IP 地址为 192.168.1.1，生成的端口号为 5000
+    // 那么返回的响应将是：227 entering passive mode (192,168,1,1,19,136)
+    // 其中 19 和 136 分别是 5000 的高位和低位字节（5000 = 19*256 + 136）
+    
+        
+        srand(time(NULL));
+        int port=rand()%40000+1024;
+        int p1=port/256;
+        int p2=port%256;
+        char str[6];
+        sprintf(str,"%d",port);
+
+        int listen_fd=socket(AF_INET,SOCK_STREAM,0);
+        if(listen_fd==-1){
+            perror("socket failed");
+            return;
+        }
+
+        struct sockaddr_in addr{};
+        addr.sin_family=AF_INET;
+        addr.sin_addr.s_addr=INADDR_ANY;
+        addr.sin_port=htons(port);
+        
+        if(bind(listen_fd,(struct sockaddr*)&addr,sizeof(addr))==-1){
+            perror("bind failed");
+            close(listen_fd);
+            return;
+        }
+
+        if(listen(listen_fd,5)==-1){
+            perror("listen failed");
+            close(listen_fd);
+            return;
+        }
+        
+        fcntl(listen_fd,F_SETFL,O_NONBLOCK);
+
+        struct epoll_event ev;
+        ev.data.fd=listen_fd;
+        ev.events=EPOLLIN|EPOLLET|EPOLLRDHUP|EPOLLERR;
+        if(epoll_ctl(epfd,EPOLL_CTL_ADD,server_fd,&ev)==-1){
+            perror("epoll_ctl failed");
+            return;
+        }
+
+        socklen_t len=sizeof(addr);
+        getsockname(listen_fd,(struct sockaddr*)&addr,&len);
+        
+
+
+        // struct sockaddr_storage addr;
+        // socklen_t len=sizeof(sockaddr_storage);
+        // getsockname(listen_fd,(sockaddr*)&addr,&len);
+        // 用notify_one唤醒  哪里唤醒呢。。。
+    
+    
+    
+    
+        // 创建线程
+    
+        //condition.wait(lock,[this]{return !this->tasks.empty()||this->stop;});
+    
+    
+        // 在这里面查找控制连接的传递的参数吗
+    
+    }
+
+    
+
+        // 6. 构造 227 响应
+        char ip_str[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &addr.sin_addr, ip_str, sizeof(ip_str));
+    
+        unsigned char* bytes = (unsigned char*)&addr.sin_addr.s_addr;
+        int h1 = bytes[0], h2 = bytes[1], h3 = bytes[2], h4 = bytes[3];
+        int p1 = ntohs(addr.sin_port) / 256;
+        int p2 = ntohs(addr.sin_port) % 256;
+    
+        char response[128];
+        snprintf(response, sizeof(response),
+                 "227 entering passive mode (%d,%d,%d,%d,%d,%d)\r\n",
+                 h1, h2, h3, h4, p1, p2);
+    
+        // 7. 发送响应
+        send(new_arg->fd, response, strlen(response), 0);
+    
+        // 8. 清理（如果需要）
+    }
