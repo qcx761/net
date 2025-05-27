@@ -804,3 +804,216 @@ void send_file_list(int data_fd) {
         struct stat statbuf;
         std::string path = entry->d_name;
         if (stat
+
+
+
+
+            typedef struct {
+                int control_fd;       // 控制连接的文件描述符
+                int data_fd;          // 数据连接的文件描述符（-1 表示未建立）
+                struct sockaddr_in client_addr;  // 客户端地址（用于 PASV 模式）
+                int pasv_port;        // PASV 模式下的数据端口
+                int is_pasv;          // 是否处于被动模式（1=是，0=否）
+                char command[256];    // 当前待处理的命令（如 "LIST"）
+                char arg[256];        // 命令参数（如 "filename"）
+            } client_state_t;
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            void* handle_RETR(void* retr) {
+                struct FtpRetr* re = (struct FtpRetr*)retr;
+                struct FtpClient* client= re->client;
+                char path[200];
+                strcpy(path, re->path);
+                //establish_tcp_connection(client);
+                FILE* file = NULL;
+                char _path[400];
+                strcpy(_path, client->_root);
+                strcat(_path, client->_cur_path);
+                if (_path[strlen(_path) - 1] != '/') {
+                    strcat(_path, "/");
+                }
+                strcat(_path, path);
+                show_log(_path);
+                file = fopen(_path, "rb");
+            
+                if (file == NULL ) {
+                    send_msg(client->_client_socket, "451 trouble to retr file\r\n");
+                    return NULL;
+                }
+            
+                if (establish_tcp_connection(client) > 0) {
+                    send_msg(client->_client_socket,
+                            "150 Data connection accepted; transfer starting.\r\n");
+                    char buf[1000];
+                    while (!feof(file)) {
+                        int n = fread(buf, 1, 1000, file);
+                        int j = 0;
+                        while (j < n) {
+                            j += send(client->_data_socket, buf + j, n - j, 0);
+                        }
+            
+                        //	send_msg(client->_client_socket, "426 TCP connection was established but then broken\r\n");
+                        //return;
+            
+                    }
+            
+                    fclose(file);
+                    cancel_tcp_connection(client);
+            
+                    send_msg(client->_client_socket, "226 Transfer ok.\r\n");
+                } else {
+                    send_msg(client->_client_socket,
+                            "425 TCP connection cannot be established.\r\n");
+                }
+                pthread_exit(NULL);
+                return NULL;
+            }
+            //
+
+
+
+
+
+
+            void handle_STOR(struct FtpClient* client, char* path) {
+                //establish_tcp_connection(client);
+                FILE* file = NULL;
+                char _path[400];
+                strcpy(_path, client->_root);
+                strcat(_path, client->_cur_path);
+                if (_path[strlen(_path) - 1] != '/') {
+                    strcat(_path, "/");
+                }
+                strcat(_path, path);
+            
+                file = fopen(_path, "wb");
+                show_log(_path);
+            
+                if (file == NULL ) {
+                    send_msg(client->_client_socket, "451 trouble to stor file\r\n");
+                    return;
+                }
+            
+                if (establish_tcp_connection(client) > 0) {
+                    send_msg(client->_client_socket,
+                            "150 Data connection accepted; transfer starting.\r\n");
+                    char buf[1000];
+                    int j = 0;
+                    while (1) {
+                        j = recv(client->_data_socket, buf, 1000, 0);
+                        if (j == 0) {
+                            cancel_tcp_connection(client);
+                            break;
+                        }
+                        if (j < 0) {
+                            send_msg(client->_client_socket,
+                                    "426 TCP connection was established but then broken\r\n");
+                            return;
+                        }
+                        fwrite(buf, 1, j, file);
+            
+                    }
+                    cancel_tcp_connection(client);
+                    fclose(file);
+            
+                    send_msg(client->_client_socket, "226 stor ok.\r\n");
+                } else {
+                    send_msg(client->_client_socket,
+                            "425 TCP connection cannot be established.\r\n");
+                }
+            }
+
+
+
+
+            
+            void handle_LIST(struct FtpClient* client) {
+                FILE *pipe_fp = NULL;
+                show_log(client->_cur_path);
+                char list_cmd_info[200];
+                char path[200];
+                my_strcpy(path, client->_root);
+                my_strcat(path, client->_cur_path);
+                sprintf(list_cmd_info, "ls -l %s", path);
+                show_log(list_cmd_info);
+            
+                if ((pipe_fp = popen(list_cmd_info, "r")) == NULL ) {
+                    show_log("pipe open error in cmd_list\n");
+                    send_msg(client->_client_socket,
+                            "451 the server had trouble reading the directory from disk\r\n");
+                    return;
+                } else {
+                    show_log("cannot establish connection.");
+                }
+                //int Flag=fcntl(client->_client_socket, F_GETFL, 0);
+                //Flag |= O_NONBLOCK;
+                //fcntl(client->_client_socket, F_SETFL, Flag);
+                char log[100];
+                sprintf(log, "pipe open successfully!, cmd is %s.", list_cmd_info);
+                show_log(log);
+                if (establish_tcp_connection(client)) {
+                    show_log("establish tcp socket");
+                } else {
+                    send_msg(client->_client_socket,
+                            "425 TCP connection cannot be established.\r\n");
+                }
+                send_msg(client->_client_socket,
+                        "150 Data connection accepted; transfer starting.\r\n");
+            
+                char buf[BUFFER_SIZE * 10];
+            
+                fread(buf, BUFFER_SIZE * 10 - 1, 1, pipe_fp);
+            
+                int l = _find_first_of(buf, '\n');
+                send_msg(client->_data_socket, &(buf[l + 1]));
+                // send_msg(client->_client_socket, "426 TCP connection was established but then broken");
+                pclose(pipe_fp);
+                cancel_tcp_connection(client);
+                send_msg(client->_client_socket, "226 Transfer ok.\r\n");
+            
+            }
+            //
