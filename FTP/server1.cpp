@@ -316,15 +316,24 @@ void handle_list(int data_fd){
     struct dirent *entry;
     char buffer[1024];
 
+    dir=opendir(".");
+    if(!dir){
+        send(data_fd,"550 Failed to open directory.\r\n",30,0);
+        return;
+    }
 
+    while((entry=readdir(dir))!=NULL){
+        if(strcmp(entry->d_name,".")==0||strcmp(entry->d_name,"..")==0){
+            continue;
+        }
+        snprintf(buffer,sizeof(buffer),"%s\r\n",entry->d_name);
+        send(data_fd,buffer,strlen(buffer),0);
+    }
 
-
-
-
-
-
-
+    closedir(dir);
+    send(data_fd,"226 Transfer complete.\r\n",24,0);
 }
+
 
 void handle_retr(int data_fd){
     return;
