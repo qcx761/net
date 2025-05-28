@@ -37,15 +37,17 @@ int server_fd;// 全局变量
 class ControlConnect{
     public:
         int control_fd; // 控制连接的文件描述符
+        char filename[100]{0};
         int pasv;
         int list;
         int retr;
         int stor;
-        ControlConnect(int fd,int n):control_fd(fd),pasv(0),list(0),retr(0),stor(0){
+        ControlConnect(int fd,int n,char* buf):control_fd(fd),pasv(0),list(0),retr(0),stor(0){
         if(n==1) pasv=1;
         if(n==2) list=1;
         if(n==3) retr=1;
         if(n==4) stor=1;
+        strcpy(filename,buf);
         }
         void set_msg(int n){
             list=0;
@@ -74,14 +76,17 @@ class ConnectionGroup{
         std::unordered_map<int,int> data_to_control;
 
         // 初始化控制连接
-        void get_init_control(int fd,int n){ // 判断fd是否存在，存在就修改，不存在初始化
+        void get_init_control(int fd,int n,char* buf){ // 判断fd是否存在，存在就修改，不存在初始化
 
             auto it=std::find_if(control_connections.begin(),control_connections.end(),[fd](const ControlConnect& conn){return conn.control_fd==fd;});
         
             if(it==control_connections.end()){
-            control_connections.emplace_back(fd,n);
+            control_connections.emplace_back(fd,n,buf);
             }else{
                 // 修改参数
+                if(buf){
+                strcpy(it->filename,buf);
+                }
                 it->set_msg(n);
             }
         }
@@ -292,18 +297,14 @@ void handle_pasv(int client_fd){
          
 
 
+        // 实现参数的处理函数？？？？？？？？？？？？？？
 
-        // 用notify_one唤醒  哪里唤醒呢。。。
-    
-    
-    
-    
-        // 创建线程
-    
+
+        
+        // 用notify_one唤醒  哪里唤醒呢。。。    
         //condition.wait(lock,[this]{return !this->tasks.empty()||this->stop;});
     
     
-        // 在这里面查找控制连接的传递的参数吗
     
     }
 
@@ -311,7 +312,7 @@ void handle_pasv(int client_fd){
 
 
 // 数据连接fd
-void handle_list(int data_fd){
+void handle_list(int data_fd){ // 传输目录下的文件
     DIR *dir;
     struct dirent *entry;
     char buffer[1024];
@@ -334,12 +335,15 @@ void handle_list(int data_fd){
     send(data_fd,"226 Transfer complete.\r\n",24,0);
 }
 
+// 服务端将指定的文件传输给客户端
+void handle_retr(int data_fd,char* name){
 
-void handle_retr(int data_fd){
+
     return;
 }
 
-void handle_stor(int data_fd){
+// 服务端准备接收并存储客户端传输的文件
+void handle_stor(int data_fd,char* name){
     return;
 }
 
@@ -382,25 +386,14 @@ void handle_accept(int fd,class ConnectionGroup group){ // 控制连接的创建
     }
     
     
+    // 找到控制连接的类寻找控制连接的消息，用条件变量来阻塞？？？并调用下面的函数？
     
-    
-    // fd是否存在？？？？  // 要干嘛来着
-    
-    //处理控制连接和数据连接实现
-    // ?????????????????????
+    // 记得判断pasv是否建立
+
+    // fd是否存在？？？？  
 
     // 等待到通知？？？this->condition.wait(lock,[this]{return !this->tasks.empty()||this->stop;});
 
-
-
-
-
-    
-
-
-
-
-    // 控制线程要干啥
 
 }
 
@@ -412,26 +405,42 @@ void handle_accept(int fd,class ConnectionGroup group){ // 控制连接的创建
 
 
 
-void handle_control_msg(char *buf,int server_fd,class ConnectionGroup group){
+void handle_control_msg(char *buf,int server_fd,class ConnectionGroup group){ // 这个锁奇奇怪怪的
+    size_t length=strlen(buf);
+    char buf_copy[256];
+    char str[128];
+    strncpy(buf_copy,buf,sizeof(buf_copy)-1);
+    buf_copy[sizeof(buf_copy)-1]='\0';
+    
+
+    char* token=strtok(buf_copy," ");
+    if(token!=nullptr){
+        token=strtok(nullptr," ");
+        if(token!=nullptr){
+            strcpy(str,token);
+            str[strlen(str)]='\0'; // 确保字符串以 null 结尾
+        }else{
+            str[0]=='\0';
+        }
+    }
+
 {
     unique_lock<mutex> lock(mtx);
     if(strstr(buf,"PASV")!=NULL){ // 处理数据连接
-        group.get_init_control(server_fd,1);
+        group.get_init_control(server_fd,1,nullptr);
         std::thread client_thread(handle_pasv,server_fd);
     }else if(strstr(buf,"LIST")!=NULL){ // 获取文件列表
-        //handle_list(client_fd);
-
-
-        // 判断pasv是否建立???
-
-
-        group.get_init_control(server_fd,2);
+        group.get_init_control(server_fd,2,str);
     }else if(strstr(buf,"RETR")!=NULL){ // 文件下载
-        //handle_retr(client_fd);
-        group.get_init_control(server_fd,3);
+        if(str[0]!='\0')
+        group.get_init_control(server_fd,3,str);
+        else
+        group.get_init_control(server_fd,3,nullptr);
     }else if(strstr(buf,"STOR")!=NULL){ // 文件上传
-        //handle_stor(client_fd);
-        group.get_init_control(server_fd,4);
+        if(str[0]!='\0')
+        group.get_init_control(server_fd,4,str);
+        else
+        group.get_init_control(server_fd,4,nullptr);
     }else if(strstr(buf,"QUIT")!=NULL){ // 连接关闭
         group.remove_control_connection(server_fd);
         epoll_ctl(epfd,EPOLL_CTL_DEL,server_fd,nullptr);

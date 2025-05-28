@@ -970,7 +970,7 @@ void send_file_list(int data_fd) {
 
 
 
-            
+
             void handle_LIST(struct FtpClient* client) {
                 FILE *pipe_fp = NULL;
                 show_log(client->_cur_path);
@@ -1017,3 +1017,15 @@ void send_file_list(int data_fd) {
             
             }
             //
+
+
+
+
+    char* token=strtok(buf_copy," ");
+    if(token!=nullptr){
+        token=strtok(nullptr," ");
+        if(token!=nullptr){
+            strncpy(str,token);
+            arg[sizeof(str)]='\0'; // 确保字符串以 null 结尾
+        }
+    }
