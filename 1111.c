@@ -1029,3 +1029,99 @@ void send_file_list(int data_fd) {
             arg[sizeof(str)]='\0'; // 确保字符串以 null 结尾
         }
     }
+
+
+void handle_retr(int data_fd, const char* filename) {
+
+
+    struct stat statbuf;
+    if (fstat(file_fd, &statbuf) == -1) {
+        close(file_fd);
+        send(data_fd, "550 Failed to get file size.\r\n", 30, 0);
+        return;
+    }
+
+    // 使用 sendfile 高效传输
+    ssize_t bytes_sent = sendfile(data_fd, file_fd, &offset, statbuf.st_size);
+
+    if (bytes_sent == -1) {
+        perror("sendfile failed");
+        close(file_fd);
+        send(data_fd, "426 Connection closed; transfer aborted.\r\n", 42, 0);
+        return;
+    }
+
+    close(file_fd);
+    send(data_fd, "226 Transfer complete.\r\n", 24, 0);
+}
+
+// 服务端将指定的文件传输给客户端
+void handle_retr(int data_fd,char* filename){
+    int file_fd=open(filename,O_RDONLY);
+    if(file_fd==-1){
+        send(data_fd,"550 File not found.\r\n",20,0);
+        return;
+    }
+
+    struct stat statbuf;
+    if(fstat(file_fd,&statbuf)==-1){
+        close(file_fd);
+        send(data_fd,"550 Failed to get file size.\r\n",30,0);
+        return;
+    }
+    // 其是偏移量
+    off_t offset = 0;
+    ssize_t bytes_sent=sendfile(data_fd,file_fd,&offset,statbuf.st_size);
+
+    
+    if(bytes_sent==-1){
+        perror("sendfile failed");
+        close(file_fd);
+        send(data_fd,"426 Connection closed; transfer aborted.\r\n",42,0);
+        return;
+    }
+
+    close(file_fd);
+    send(data_fd, "226 Transfer complete.\r\n", 24, 0);    
+}
+
+
+
+
+#define BUFFER_SIZE 4096  // 缓冲区大小
+
+void handle_stor(int data_fd, char *filename) {
+    // 打开文件 如果存在则覆盖,不存在则创建
+    int file_fd=open(filename,O_WRONLY|O_CREAT|O_TRUNC,0644);
+    if(file_fd==-1){
+        perror("open failed");
+        send(data_fd,"550 Failed to create file.\r\n",28,0);
+        return;
+    }
+
+    char buffer[4096];
+    ssize_t bytes_received;
+
+    // 循环接收数据并写入文件
+    while((bytes_received=recv(data_fd,buffer,4096,0))>0){
+        ssize_t bytes_written=write(file_fd,buffer,bytes_received);
+        if(bytes_written==-1){
+            perror("write failed");
+            close(file_fd);
+            send(data_fd,"451 Write error.\r\n",18,0);
+            return;
+        }
+    }
+
+    // 检查接收是否出错
+    if(bytes_received==-1){
+        perror("recv failed");
+        close(file_fd);
+        send(data_fd, "426 Connection closed; transfer aborted.\r\n", 42, 0);
+        return;
+    }
+
+    //  关闭文件并发送成功响应
+    close(file_fd);
+    send(data_fd,"226 Transfer complete.\r\n",24,0);
+}

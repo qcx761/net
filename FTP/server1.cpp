@@ -13,6 +13,8 @@
 #include <ctime>
 #include <thread>
 #include "threadpool.hpp"
+#include <sys/sendfile.h>
+
 
 using namespace std;
 
@@ -31,7 +33,7 @@ using namespace std;
 std::mutex mtx; // 互斥锁
 int epfd;
 int server_fd;// 全局变量
-
+bool is_continue;
 //可以扔到类里面封装？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？/
 
 class ControlConnect{
@@ -97,7 +99,7 @@ class ConnectionGroup{
         }
 
         // 添加连接（control_fd 和 data_fd 关联）
-        void add_connection(int control_fd,int data_fd){
+        void add_connection(int control_fd,int data_fd){                                 // 好像没用。。。。。。
 
             data_to_control[data_fd]=control_fd;  // 存储反向映射
         }
@@ -225,7 +227,7 @@ void FTP_init(){
 
 
 // 数据连接创建
-void handle_pasv(int client_fd){
+void handle_pasv(int control_fd){
 
     // 服务端控制线程接收到 PASV 请求后，创建一个数据传输线程，并将生成的端口号告知客户端控制线程，
     // 返回 227 entering passive mode (h1,h2,h3,h4,p1,p2)，其中端口号为 p1*256+p2，IP 地址为 h1.h2.h3.h4。
@@ -241,7 +243,7 @@ void handle_pasv(int client_fd){
         int p2=port%256;
 
 
-        // 随机端口占用怎么办？？？？？？？？？？？？？？？？？？？？？？？？？？
+        // 随机端口占用了怎么办？？？？？？？？？？？？？？？？？？？？？？？？？？
 
         int listen_fd=socket(AF_INET,SOCK_STREAM,0);
         if(listen_fd==-1){
@@ -284,7 +286,7 @@ void handle_pasv(int client_fd){
         sscanf(ip_str,"%3[^.].%3[^.].%3[^.].%3[^.]",str[0],str[1],str[2],str[3]);
         char arr[100];
         sprintf(arr,"227 entering passive mode (%s,%s,%s,%s,%d,%d)",str[0],str[1],str[2],str[3],p1,p2);
-        send(client_fd,arr,sizeof(arr),0);
+        send(control_fd,arr,sizeof(arr),0);
 
         // 先发送端口号和ip再注册？？？？？？？？？？
         struct epoll_event ev;
@@ -294,8 +296,22 @@ void handle_pasv(int client_fd){
             perror("epoll_ctl failed");
             return;
         }
-         
 
+
+        // listen_fd数据连接套接字    control_fd控制连接套接字
+        // 上面两个fd是哪个的？？？？？？？？？？？？？？？？？？？？？？？？？？
+
+
+
+
+
+        while(is_continue){
+
+            {
+                unique_lock<mutex> lock(mtx);
+                is_continue=false;
+            }
+        }
 
 
         // 实现参数的处理函数？？？？？？？？？？？？？？
@@ -339,7 +355,9 @@ void handle_list(int data_fd){ // 传输目录下的文件
 
 
 // 服务端将指定的文件传输给客户端
-void handle_retr(int data_fd,char* filename){  // 有问题！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！
+
+// 文件较大可以分块传输？？  实现？？
+void handle_retr(int data_fd,char* filename){
     int file_fd=open(filename,O_RDONLY);
     if(file_fd==-1){
         send(data_fd,"550 File not found.\r\n",20,0);
@@ -347,14 +365,22 @@ void handle_retr(int data_fd,char* filename){  // 有问题！！！！！！！
     }
 
     struct stat statbuf;
-    fstat(file_fd,&statbuf);
-    off_t file_size=statbuf.st_size;
+    if(fstat(file_fd,&statbuf)==-1){ // 获取文件大小
+        close(file_fd);
+        send(data_fd,"550 Failed to get file size.\r\n",30,0);
+        return;
+    }
 
-    // 发送文件数据
-    char buffer[4096];
-    ssize_t bytes_read;
-    while ((bytes_read = read(file_fd, buffer, sizeof(buffer))) > 0) {
-        send(data_fd, buffer, bytes_read, 0);
+    // 偏移量,记录offset可支持端点续传？？
+
+    off_t offset = 0;
+    ssize_t bytes_sent=sendfile(data_fd,file_fd,&offset,statbuf.st_size);
+    
+    if(bytes_sent==-1){
+        perror("sendfile failed");
+        close(file_fd);
+        send(data_fd,"426 Connection closed; transfer aborted.\r\n",42,0);
+        return;
     }
 
     close(file_fd);
@@ -365,19 +391,47 @@ void handle_retr(int data_fd,char* filename){  // 有问题！！！！！！！
 
 
 // 服务端准备接收并存储客户端传输的文件
-void handle_stor(int data_fd,char* filename){
-    return;
+void handle_stor(int data_fd,char *filename){
+    // 打开文件 如果存在则覆盖,不存在则创建
+    int file_fd=open(filename,O_WRONLY|O_CREAT|O_TRUNC,0644);
+    if(file_fd==-1){
+        perror("open failed");
+        send(data_fd,"550 Failed to create file.\r\n",28,0);
+        return;
+    }
+
+    char buffer[4096];
+    ssize_t bytes_received;
+
+    // 循环接收数据并写入文件
+    while((bytes_received=recv(data_fd,buffer,4096,0))>0){
+        ssize_t bytes_written=write(file_fd,buffer,bytes_received);
+        if(bytes_written==-1){
+            perror("write failed");
+            close(file_fd);
+            send(data_fd,"451 Write error.\r\n",18,0);
+            return;
+        }
+    }
+
+    // 检查接收是否出错
+    if(bytes_received==-1){
+        perror("recv failed");
+        close(file_fd);
+        send(data_fd, "426 Connection closed; transfer aborted.\r\n", 42, 0);
+        return;
+    }
+
+    //  关闭文件并发送成功响应
+    close(file_fd);
+    send(data_fd,"226 Transfer complete.\r\n",24,0);
 }
 
 
-void handle_msg(class ConnectionGroup group,int fd){
-    ;
-}
 
 
-
-
-void handle_accept(int fd,class ConnectionGroup group){ // 控制连接的创建
+// 控制连接的建立
+void handle_accept(int fd,class ConnectionGroup group){ 
     sockaddr_in client_addr{};
     socklen_t client_len=sizeof(client_addr);
     int connect_fd=accept(server_fd,(sockaddr*)&client_addr,&client_len);
@@ -396,18 +450,7 @@ void handle_accept(int fd,class ConnectionGroup group){ // 控制连接的创建
     if(epoll_ctl(epfd,EPOLL_CTL_ADD,connect_fd,&ev)==-1){
         perror("epoll_ctl");
         close(connect_fd);
-    }
-
-
-
-
-
-
-    while(1){
-        ;
-    }
-    
-    
+    }    
     // 找到控制连接的类寻找控制连接的消息，用条件变量来阻塞？？？并调用下面的函数？
     
     // 记得判断pasv是否建立
@@ -416,11 +459,8 @@ void handle_accept(int fd,class ConnectionGroup group){ // 控制连接的创建
 
     // 等待到通知？？？this->condition.wait(lock,[this]{return !this->tasks.empty()||this->stop;});
 
-
+    // 要写啥？？？？？？？？？？？？？？？？
 }
-
-
-
 
 
 
@@ -478,7 +518,7 @@ void handle_control_msg(char *buf,int server_fd,class ConnectionGroup group){ //
 
 
 
-
+    is_continue=true;
 
 }
 }
@@ -529,13 +569,13 @@ void FTP_start(class ConnectionGroup group){
                     } 
                 }else{ // 数据连接
                     if(events[i].events&EPOLLIN){ // 处理可读事件
-
-
+                        // 接收文件中
+                        ;
 
 
                     }else if(events[i].events & EPOLLOUT){ // 处理可写事件
-
-
+                        // 上传文件中
+                        ;
 
 
                     }else{ // 不知道还有啥
