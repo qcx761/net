@@ -36,29 +36,37 @@ int server_fd;// 全局变量
 bool is_continue;
 //可以扔到类里面封装？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？/
 
+
+void handle_list(int data_fd);
+void handle_retr(int data_fd,char* filename);
+void handle_stor(int data_fd,char *filename);
+
 class ControlConnect{
     public:
         int control_fd; // 控制连接的文件描述符
-        char filename[100]{0};
-        int pasv;
-        int list;
-        int retr;
-        int stor;
-        ControlConnect(int fd,int n,char* buf):control_fd(fd),pasv(0),list(0),retr(0),stor(0){
-        if(n==1) pasv=1;
-        if(n==2) list=1;
-        if(n==3) retr=1;
-        if(n==4) stor=1;
+        char filename[100];
+        int n;
+        // int pasv;
+        // int list;
+        // int retr;
+        // int stor;
+        ControlConnect(int fd,int m,char* buf):control_fd(fd){//,pasv(0),list(0),retr(0),stor(0){
+        // if(n==1) pasv=1;
+        // if(n==2) list=1;
+        // if(n==3) retr=1;
+        // if(n==4) stor=1;
+        n=m;
         strcpy(filename,buf);
         }
-        void set_msg(int n){
-            list=0;
-            retr=0;
-            stor=0;
-            if(n==1) pasv=1;
-            if(n==2) list=1;
-            if(n==3) retr=1;
-            if(n==4) stor=1;
+        void set_msg(int m){
+            // list=0;
+            // retr=0;
+            // stor=0;
+            // if(n==1) pasv=1;
+            // if(n==2) list=1;
+            // if(n==3) retr=1;
+            // if(n==4) stor=1;
+            n=m;
         }
 };
     
@@ -99,7 +107,7 @@ class ConnectionGroup{
         }
 
         // 添加连接（control_fd 和 data_fd 关联）
-        void add_connection(int control_fd,int data_fd){                                 // 好像没用。。。。。。
+        void add_connection(int control_fd,int data_fd){                                 // 好像没用。。。。。。   要关联吗？？？？？
 
             data_to_control[data_fd]=control_fd;  // 存储反向映射
         }
@@ -130,7 +138,28 @@ class ConnectionGroup{
             }
         }
         
+        int find_n(int fd){
+            auto it=std::find_if(control_connections.begin(),control_connections.end(),[fd](const ControlConnect& conn){return conn.control_fd==fd;});
         
+            if(it==control_connections.end()){
+            return 0;
+            }else{
+                return it->n;
+            }
+        }
+        
+        char* find_filename(int fd){
+            auto it=std::find_if(control_connections.begin(),control_connections.end(),[fd](const ControlConnect& conn){return conn.control_fd==fd;});
+        
+            if(it==control_connections.end()){
+            return "\0";
+            }else{
+                char* a=(char *)malloc(sizeof(char)*100);
+                a=it->filename;
+                return a;
+            }
+        }
+        //char *filename=group.find_filename(control_fd);
         
 
 
@@ -227,7 +256,7 @@ void FTP_init(){
 
 
 // 数据连接创建
-void handle_pasv(int control_fd){
+void handle_pasv(int control_fd,ConnectionGroup& group){
 
     // 服务端控制线程接收到 PASV 请求后，创建一个数据传输线程，并将生成的端口号告知客户端控制线程，
     // 返回 227 entering passive mode (h1,h2,h3,h4,p1,p2)，其中端口号为 p1*256+p2，IP 地址为 h1.h2.h3.h4。
@@ -244,6 +273,10 @@ void handle_pasv(int control_fd){
 
 
         // 随机端口占用了怎么办？？？？？？？？？？？？？？？？？？？？？？？？？？
+        // do {
+        //     port = rand() % 40000 + 1024;
+        //     // 检查绑定是否成功
+        // } while (bind(listen_fd, (struct sockaddr*)&addr, sizeof(addr)) == -1);
 
         int listen_fd=socket(AF_INET,SOCK_STREAM,0);
         if(listen_fd==-1){
@@ -286,9 +319,9 @@ void handle_pasv(int control_fd){
         sscanf(ip_str,"%3[^.].%3[^.].%3[^.].%3[^.]",str[0],str[1],str[2],str[3]);
         char arr[100];
         sprintf(arr,"227 entering passive mode (%s,%s,%s,%s,%d,%d)",str[0],str[1],str[2],str[3],p1,p2);
-        send(control_fd,arr,sizeof(arr),0);
+        send(control_fd,arr,sizeof(arr),0);  // 通过控制连接发送信息
 
-        // 先发送端口号和ip再注册？？？？？？？？？？
+        // 先发送端口号和ip再注册？？？？？？？？？？   要注册吗？？？？？？？？？？？？？？？？？
         struct epoll_event ev;
         ev.data.fd=listen_fd;
         ev.events = EPOLLIN|EPOLLOUT|EPOLLET|EPOLLRDHUP|EPOLLERR;
@@ -299,20 +332,32 @@ void handle_pasv(int control_fd){
 
 
         // listen_fd数据连接套接字    control_fd控制连接套接字
-        // 上面两个fd是哪个的？？？？？？？？？？？？？？？？？？？？？？？？？？
 
 
 
 
-
-        while(is_continue){
+        while(1){
+        if(is_continue){
+            int n=group.find_n(control_fd);
+            char *filename=group.find_filename(control_fd);
+            if(n==2){
+                handle_list(listen_fd);
+            }else if(n==3){
+                handle_retr(listen_fd,filename);
+                free(filename);
+            }else if(n==4){
+                handle_stor(listen_fd,filename);
+                free(filename);
+            }else{
+                continue;
+            }
 
             {
                 unique_lock<mutex> lock(mtx);
                 is_continue=false;
             }
         }
-
+    }
 
         // 实现参数的处理函数？？？？？？？？？？？？？？
 
@@ -431,7 +476,7 @@ void handle_stor(int data_fd,char *filename){
 
 
 // 控制连接的建立
-void handle_accept(int fd,class ConnectionGroup group){ 
+void handle_accept(int fd,ConnectionGroup& group){ 
     sockaddr_in client_addr{};
     socklen_t client_len=sizeof(client_addr);
     int connect_fd=accept(server_fd,(sockaddr*)&client_addr,&client_len);
@@ -467,7 +512,7 @@ void handle_accept(int fd,class ConnectionGroup group){
 
 
 
-void handle_control_msg(char *buf,int server_fd,class ConnectionGroup group){ // 这个锁奇奇怪怪的
+void handle_control_msg(char *buf,int server_fd,ConnectionGroup& group){ // 这个锁奇奇怪怪的
     size_t length=strlen(buf);
     char buf_copy[256];
     char str[128];
@@ -488,7 +533,7 @@ void handle_control_msg(char *buf,int server_fd,class ConnectionGroup group){ //
     unique_lock<mutex> lock(mtx);
     if(strstr(buf,"PASV")!=NULL){ // 处理数据连接
         group.get_init_control(server_fd,1,nullptr);
-        std::thread client_thread(handle_pasv,server_fd);
+        std::thread client_thread(handle_pasv,server_fd,group);
         client_thread.detach();
     }else if(strstr(buf,"LIST")!=NULL){ // 获取文件列表
         group.get_init_control(server_fd,2,str);
@@ -503,7 +548,7 @@ void handle_control_msg(char *buf,int server_fd,class ConnectionGroup group){ //
         else
         group.get_init_control(server_fd,4,nullptr);
     }else if(strstr(buf,"QUIT")!=NULL){ // 连接关闭
-        group.remove_control_connection(server_fd);
+        group.remove_control_connection(server_fd);                          // 没关联要取消掉
         epoll_ctl(epfd,EPOLL_CTL_DEL,server_fd,nullptr);
         close(server_fd);
     }else{ // 其他命令
@@ -529,7 +574,7 @@ void handle_control_msg(char *buf,int server_fd,class ConnectionGroup group){ //
 
 
 
-void FTP_start(class ConnectionGroup group){
+void FTP_start(ConnectionGroup& group){
     while(1){
         struct epoll_event events[maxevents];
         int n=epoll_wait(epfd,events,maxevents,-1);
@@ -545,7 +590,7 @@ void FTP_start(class ConnectionGroup group){
                 continue;
             }
             if(events[i].data.fd==server_fd){ // 客户端连接
-                std::thread client_thread(handle_accept,server_fd,group);
+                std::thread client_thread(handle_accept,server_fd,std::ref(group));
                 client_thread.detach();
             }
             else{ // 数据连接和控制连接触发
