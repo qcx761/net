@@ -533,7 +533,7 @@ void handle_control_msg(char *buf,int server_fd,ConnectionGroup& group){ // 这�
     unique_lock<mutex> lock(mtx);
     if(strstr(buf,"PASV")!=NULL){ // 处理数据连接
         group.get_init_control(server_fd,1,nullptr);
-        std::thread client_thread(handle_pasv,server_fd,group);
+        std::thread client_thread(handle_pasv,server_fd,std::ref(group));
         client_thread.detach();
     }else if(strstr(buf,"LIST")!=NULL){ // 获取文件列表
         group.get_init_control(server_fd,2,str);
