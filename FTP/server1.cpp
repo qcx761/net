@@ -22,8 +22,8 @@ using namespace std;
 #define EPSIZE 1024
 #define maxevents 1024
 
-threadpool control_pool(10); // 控制连接线程池
-threadpool data_pool(10);     // 数据连接线程池
+// threadpool control_pool(10); // 控制连接线程池
+// threadpool data_pool(10);     // 数据连接线程池
 
 // ？？？？？？？？？？？？？？？？？？？？？？？？？
 
@@ -268,14 +268,6 @@ void handle_pasv(int client_fd){
         
         fcntl(listen_fd,F_SETFL,O_NONBLOCK);
 
-        struct epoll_event ev;
-        ev.data.fd=listen_fd;
-        ev.events=EPOLLIN|EPOLLET|EPOLLRDHUP|EPOLLERR;
-        if(epoll_ctl(epfd,EPOLL_CTL_ADD,server_fd,&ev)==-1){
-            perror("epoll_ctl failed");
-            return;
-        }
-
         socklen_t len=sizeof(addr);
         if(getsockname(listen_fd,(struct sockaddr*)&addr,&len)==-1){
             perror("getsockname failed");
@@ -294,13 +286,22 @@ void handle_pasv(int client_fd){
         sprintf(arr,"227 entering passive mode (%s,%s,%s,%s,%d,%d)",str[0],str[1],str[2],str[3],p1,p2);
         send(client_fd,arr,sizeof(arr),0);
 
+        // 先发送端口号和ip再注册？？？？？？？？？？
+        struct epoll_event ev;
+        ev.data.fd=listen_fd;
+        ev.events = EPOLLIN|EPOLLOUT|EPOLLET|EPOLLRDHUP|EPOLLERR;
+        if(epoll_ctl(epfd,EPOLL_CTL_ADD,server_fd,&ev)==-1){
+            perror("epoll_ctl failed");
+            return;
+        }
          
+
 
 
         // 实现参数的处理函数？？？？？？？？？？？？？？
 
 
-        
+
         // 用notify_one唤醒  哪里唤醒呢。。。    
         //condition.wait(lock,[this]{return !this->tasks.empty()||this->stop;});
     
@@ -335,15 +336,36 @@ void handle_list(int data_fd){ // 传输目录下的文件
     send(data_fd,"226 Transfer complete.\r\n",24,0);
 }
 
+
+
 // 服务端将指定的文件传输给客户端
-void handle_retr(int data_fd,char* name){
+void handle_retr(int data_fd,char* filename){  // 有问题！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！
+    int file_fd=open(filename,O_RDONLY);
+    if(file_fd==-1){
+        send(data_fd,"550 File not found.\r\n",20,0);
+        return;
+    }
 
+    struct stat statbuf;
+    fstat(file_fd,&statbuf);
+    off_t file_size=statbuf.st_size;
 
-    return;
+    // 发送文件数据
+    char buffer[4096];
+    ssize_t bytes_read;
+    while ((bytes_read = read(file_fd, buffer, sizeof(buffer))) > 0) {
+        send(data_fd, buffer, bytes_read, 0);
+    }
+
+    close(file_fd);
+    send(data_fd, "226 Transfer complete.\r\n", 24, 0);
 }
 
+
+
+
 // 服务端准备接收并存储客户端传输的文件
-void handle_stor(int data_fd,char* name){
+void handle_stor(int data_fd,char* filename){
     return;
 }
 
@@ -369,7 +391,7 @@ void handle_accept(int fd,class ConnectionGroup group){ // 控制连接的创建
 
     // 注册到 epoll
     struct epoll_event ev;
-    ev.events=EPOLLIN|EPOLLET|EPOLLRDHUP|EPOLLERR;
+    ev.events=EPOLLIN|EPOLLET|EPOLLRDHUP|EPOLLERR; // 客户端向服务端发送信息触发
     ev.data.fd=connect_fd;
     if(epoll_ctl(epfd,EPOLL_CTL_ADD,connect_fd,&ev)==-1){
         perror("epoll_ctl");
@@ -411,14 +433,12 @@ void handle_control_msg(char *buf,int server_fd,class ConnectionGroup group){ //
     char str[128];
     strncpy(buf_copy,buf,sizeof(buf_copy)-1);
     buf_copy[sizeof(buf_copy)-1]='\0';
-    
-
     char* token=strtok(buf_copy," ");
     if(token!=nullptr){
         token=strtok(nullptr," ");
         if(token!=nullptr){
             strcpy(str,token);
-            str[strlen(str)]='\0'; // 确保字符串以 null 结尾
+            str[strlen(str)]='\0';
         }else{
             str[0]=='\0';
         }
@@ -429,6 +449,7 @@ void handle_control_msg(char *buf,int server_fd,class ConnectionGroup group){ //
     if(strstr(buf,"PASV")!=NULL){ // 处理数据连接
         group.get_init_control(server_fd,1,nullptr);
         std::thread client_thread(handle_pasv,server_fd);
+        client_thread.detach();
     }else if(strstr(buf,"LIST")!=NULL){ // 获取文件列表
         group.get_init_control(server_fd,2,str);
     }else if(strstr(buf,"RETR")!=NULL){ // 文件下载
@@ -448,6 +469,17 @@ void handle_control_msg(char *buf,int server_fd,class ConnectionGroup group){ //
     }else{ // 其他命令
         send(server_fd,"500 Unknown command\r\n",21,0);
     }
+    // 通知数据连接？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？/
+    //？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？
+
+
+
+
+
+
+
+
+
 }
 }
 
@@ -476,7 +508,7 @@ void FTP_start(class ConnectionGroup group){
                 std::thread client_thread(handle_accept,server_fd,group);
                 client_thread.detach();
             }
-            else{
+            else{ // 数据连接和控制连接触发
                 int fd=events[i].data.fd;
                 if(get_port(fd)==2100){ // 控制连接
                     char buf[1024];
@@ -491,20 +523,42 @@ void FTP_start(class ConnectionGroup group){
                     close(events[i].data.fd);
                     }else{
                         buf[len]='\0';
-                        auto future1=control_pool.enqueue(handle_control_msg,buf,fd,group);
-                        future1.get();
-                    }
-                }else{
+                        // auto future1=control_pool.enqueue(handle_control_msg,buf,fd,group);
+                        // future1.get();
+                        handle_control_msg(buf,fd,group);
+                    } 
+                }else{ // 数据连接
+                    if(events[i].events&EPOLLIN){ // 处理可读事件
 
+
+
+
+                    }else if(events[i].events & EPOLLOUT){ // 处理可写事件
+
+
+
+
+                    }else{ // 不知道还有啥
+                        return;
+                    }
+
+                    // 客户端发送信息
                     ;// 数据连接
 
 
                     //fd转换到client_fd
-
                     // 实现数据传输要放在哪
 
-                    auto future2=data_pool.enqueue(handle_msg,group,fd); // 参数还要修改
-                    future2.get();
+                    //判断是写入还是读取触发
+
+                    // 判断是在执行哪个命令，读取？写入？
+                    // list 写入   其余 。。
+                    // 再传入一个参数？？
+
+
+
+                    //auto future2=data_pool.enqueue(handle_msg,group,fd);
+                    //future2.get();
                 }
             }
         }

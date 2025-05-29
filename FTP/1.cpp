@@ -4,10 +4,6 @@
 
 
 
-#include <fcntl.h>
-#include <unistd.h>
-#include <sys/stat.h>
-
 void handle_retr(int data_fd, const char *filename) {
     int file_fd = open(filename, O_RDONLY);
     if (file_fd == -1) {
