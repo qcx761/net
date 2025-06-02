@@ -50,7 +50,11 @@ string send_command(int sockfd, const string& cmd) {
     while (true) {
         ssize_t bytes = recv(sockfd, buffer, BUFFER_SIZE - 1, 0);
         if (bytes <= 0) {
-            cerr << "Connection closed by server" << endl;
+            if (bytes == 0) { // 客户端主动关闭
+                cerr << "Connection closed by server" << endl;
+            } else { // 连接出错
+                perror("recv failed");
+            }
             exit(1);
         }
         buffer[bytes] = '\0';
