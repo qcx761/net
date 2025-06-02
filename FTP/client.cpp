@@ -1,341 +1,202 @@
 #include <iostream>
+#include <string>
 #include <cstring>
-#include <cstdlib>
-#include <unistd.h>
-#include <arpa/inet.h>
 #include <sys/socket.h>
-#include <sys/types.h>
-#include <fcntl.h>
-#include <thread>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <netdb.h>
 #include <vector>
 #include <sstream>
 #include <algorithm>
 
-#define PORT 2100
-#define PORT1 5000
-#define BUFFER_SIZE 1024
-
 using namespace std;
 
-// 解析服务器返回的 PASV 响应，提取 IP 和端口
-void parse_pasv_response(const string& response, string& ip, int& port) {
-    size_t start = response.find('(');
-    size_t end = response.find(')');
-    if (start == string::npos || end == string::npos) {
-        cerr << "Invalid PASV response format" << endl;
-        exit(1);
+// FTP服务器配置
+const string SERVER_IP = "127.0.0.1";  // 替换为你的服务器IP
+const int CONTROL_PORT = 2100;        // 控制连接端口
+
+// 辅助函数：发送命令并接收响应
+string send_command(int sockfd, const string& cmd){
+    if(send(sockfd,cmd.c_str(),cmd.size(),0)<0){
+        cerr << "Error sending command: " << cmd << endl;
+        return "";
     }
 
-    string pasv_data = response.substr(start + 1, end - start - 1);
-    stringstream ss(pasv_data);
-    vector<int> parts;
-    int num;
-
-    while (ss >> num) {
-        parts.push_back(num);
-        if (ss.peek() == ',') ss.ignore();
-    }
-
-    // 提取 IP 和端口
-    ip = to_string(parts[0]) + "." + to_string(parts[1]) + "." + to_string(parts[2]) + "." + to_string(parts[3]);
-    port = parts[4] * 256 + parts[5];
-}
-
-// 发送命令并接收响应
-string send_command(int sockfd, const string& cmd) {
-    send(sockfd, cmd.c_str(), cmd.size(), 0);
-    char buffer[BUFFER_SIZE];
+    // 接收响应
+    char buffer[1024];
     string response;
+    ssize_t bytes_received;
+    while((bytes_received=recv(sockfd,buffer,sizeof(buffer)-1,0))>0){
+        buffer[bytes_received]='\0';
+        response+=buffer;
 
-    while (true) {
-        ssize_t bytes = recv(sockfd, buffer, BUFFER_SIZE - 1, 0);
-        if (bytes <= 0) {
-            if (bytes == 0) { // 客户端主动关闭
-                cerr << "Connection closed by server" << endl;
-            } else { // 连接出错
-                perror("recv failed");
-            }
-            exit(1);
+        // 如果响应以 "227" 开头（PASV模式），需要解析端口号
+        if(response.find("227")==0){
+            break;  // PASV响应可能跨多个recv调用，但通常一次足够
         }
-        buffer[bytes] = '\0';
-        response += buffer;
-
-        // 检查是否收到完整响应（以 \r\n 结尾）
-        if (response.find("\r\n") != string::npos) {
+        // 如果响应以 "226" 或 "250" 开头（操作完成），可以停止
+        if(response.find("226")==0||response.find("250")==0){
             break;
         }
     }
 
-    // 去掉 \r\n
-    if (!response.empty() && response.back() == '\n') {
-        response.pop_back();
-    }
-    if (!response.empty() && response.back() == '\r') {
-        response.pop_back();
+    if(bytes_received<0){
+        cerr << "Error receiving response" << endl;
     }
 
     return response;
 }
 
-// 连接数据端口
-int connect_data_port(const string& ip, int port) {
-    int data_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (data_fd < 0) {
-        perror("socket");
-        exit(1);
+// 获取IP和端口
+pair<string, int>parse_pasv_response(const string& response){
+    size_t start=response.find("(");
+    size_t end=response.find(")");
+    if (start==string::npos||end==string::npos){
+        cerr << "Invalid PASV response format" << endl;
+        return {"", 0};
     }
 
-    struct sockaddr_in server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
-
-    if (inet_pton(AF_INET, ip.c_str(), &server_addr.sin_addr) <= 0) {
-        perror("inet_pton");
-        close(data_fd);
-        exit(1);
+    string ip_port_str=response.substr(start+1,end-start-1);
+    vector<string> parts;
+    stringstream str(ip_port_str);
+    string part;
+    while(getline(str,part,',')){
+        parts.push_back(part);
     }
 
-    if (connect(data_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
-        perror("connect");
-        close(data_fd);
-        exit(1);
+    if(parts.size()<6){
+        cerr << "Invalid PASV response format" << endl;
+        return {"", 0};
     }
 
-    return data_fd;
+    // 解析IP地址
+    string ip=parts[0]+"."+parts[1]+"."+parts[2]+"."+parts[3];
+
+    // 解析端口号
+    int p1=stoi(parts[4]); // 将string转化为int
+    int p2=stoi(parts[5]);
+    int port=p1*256+p2;
+
+    return {ip, port};
 }
 
-// LIST 命令
-void ftp_list(int control_fd) {
-    string cmd = "LIST\r\n";
-    string response = send_command(control_fd, cmd);
-
-    if (response.substr(0, 3) == "500") {
-        cerr << "Error: " << response << endl;
-        return;
+// 建立数据连接
+int connect_data(const string& ip,int port){
+    int sockfd=socket(AF_INET,SOCK_STREAM,0);
+    if(sockfd<0){
+        cerr << "Error creating data socket" << endl;
+        return -1;
     }
 
-    // 检查是否是 PASV 模式
-    if (response.find("227") == 0) {
-        string ip, pasv_ip;
-        int port, pasv_port;
-        parse_pasv_response(response, pasv_ip, pasv_port);
-
-        // 连接数据端口
-        int data_fd = connect_data_port(pasv_ip, pasv_port);
-
-        // 重新发送 LIST 命令（有些服务器需要）
-        send_command(control_fd, cmd);
-
-        // 接收文件列表
-        char buffer[BUFFER_SIZE];
-        while (true) {
-            ssize_t bytes = recv(data_fd, buffer, BUFFER_SIZE - 1, 0);
-            if (bytes <= 0) break;
-            buffer[bytes] = '\0';
-            cout << buffer;
-        }
-
-        close(data_fd);
-    } else {
-        cerr << "Unsupported LIST mode" << endl;
+    struct sockaddr_in server_addr{};
+    server_addr.sin_family=AF_INET;
+    server_addr.sin_port=htons(port);
+    if(inet_pton(AF_INET,ip.c_str(),&server_addr.sin_addr)<=0){
+        cerr << "Invalid IP address: " << ip << endl;
+        close(sockfd);
+        return -1;
     }
 
-    // 检查传输完成
-    response = send_command(control_fd, "LIST\r\n"); // 有些服务器需要再次发送 LIST
-    if (response.substr(0, 3) != "226") {
-        cerr << "Error: Transfer failed" << endl;
+    if(connect(sockfd,(struct sockaddr*)&server_addr,sizeof(server_addr))<0){
+        cerr << "Error connecting to data server" << endl;
+        close(sockfd);
+        return -1;
     }
+
+    return sockfd;
 }
 
-// RETR 命令（下载文件）
-void ftp_retr(int control_fd, const string& filename) {
-    string cmd = "RETR " + filename + "\r\n";
-    string response = send_command(control_fd, cmd);
-
-    if (response.substr(0, 3) == "500") {
-        cerr << "Error: " << response << endl;
-        return;
-    }
-
-    // 检查是否是 PASV 模式
-    if (response.find("227") == 0) {
-        string ip, pasv_ip;
-        int port, pasv_port;
-        parse_pasv_response(response, pasv_ip, pasv_port);
-
-        // 连接数据端口
-        int data_fd = connect_data_port(pasv_ip, pasv_port);
-
-        // 重新发送 RETR 命令（有些服务器需要）
-        send_command(control_fd, cmd);
-
-        // 接收文件
-        FILE* file = fopen(filename.c_str(), "wb");
-        if (!file) {
-            perror("fopen");
-            close(data_fd);
-            return;
-        }
-
-        char buffer[BUFFER_SIZE];
-        while (true) {
-            ssize_t bytes = recv(data_fd, buffer, BUFFER_SIZE - 1, 0);
-            if (bytes <= 0) break;
-            buffer[bytes] = '\0';
-            fwrite(buffer, 1, bytes, file);
-        }
-
-        fclose(file);
-        close(data_fd);
-
-        // 检查传输完成
-        response = send_command(control_fd, "RETR " + filename + "\r\n");
-        if (response.substr(0, 3) != "226") {
-            cerr << "Error: Transfer failed" << endl;
-        } else {
-            cout << "File downloaded successfully" << endl;
-        }
-    } else {
-        cerr << "Unsupported RETR mode" << endl;
-    }
-}
-
-// STOR 命令（上传文件）
-void ftp_stor(int control_fd, const string& filename) {
-    string cmd = "STOR " + filename + "\r\n";
-    string response = send_command(control_fd, cmd);
-
-    if (response.substr(0, 3) == "500") {
-        cerr << "Error: " << response << endl;
-        return;
-    }
-
-    // 检查是否是 PASV 模式
-    if (response.find("227") == 0) {
-        string ip, pasv_ip;
-        int port, pasv_port;
-        parse_pasv_response(response, pasv_ip, pasv_port);
-
-        // 连接数据端口
-        int data_fd = connect_data_port(pasv_ip, pasv_port);
-
-        // 重新发送 STOR 命令（有些服务器需要）
-        send_command(control_fd, cmd);
-
-        // 发送文件
-        FILE* file = fopen(filename.c_str(), "rb");
-        if (!file) {
-            perror("fopen");
-            close(data_fd);
-            return;
-        }
-
-        char buffer[BUFFER_SIZE];
-        while (true) {
-            ssize_t bytes = fread(buffer, 1, BUFFER_SIZE - 1, file);
-            if (bytes <= 0) break;
-            send(data_fd, buffer, bytes, 0);
-        }
-
-        fclose(file);
-        close(data_fd);
-
-        // 检查传输完成
-        response = send_command(control_fd, "STOR " + filename + "\r\n");
-        if (response.substr(0, 3) != "226") {
-            cerr << "Error: Transfer failed" << endl;
-        } else {
-            cout << "File uploaded successfully" << endl;
-        }
-    } else {
-        cerr << "Unsupported STOR mode" << endl;
-    }
-}
-
-// 登录 FTP 服务器
-int ftp_login(const string& server_ip) {
-    int control_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (control_fd < 0) {
-        perror("socket");
-        exit(1);
-    }
-
-    struct sockaddr_in server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(PORT);
-    if (inet_pton(AF_INET, server_ip.c_str(), &server_addr.sin_addr) <= 0) {
-        perror("inet_pton");
-        close(control_fd);
-        exit(1);
-    }
-
-    if (connect(control_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
-        perror("connect");
-        close(control_fd);
-        exit(1);
-    }
-
-    // 接收欢迎消息
-    char buffer[BUFFER_SIZE];
-    recv(control_fd, buffer, BUFFER_SIZE - 1, 0);
-    buffer[BUFFER_SIZE - 1] = '\0';
-    cout << "Server: " << buffer << endl;
-
-    // 发送 USER 命令
-    string response = send_command(control_fd, "USER anonymous\r\n");
-    cout << "USER response: " << response << endl;
-
-    // 发送 PASS 命令
-    response = send_command(control_fd, "PASS anonymous@\r\n");
-    cout << "PASS response: " << response << endl;
-
-    return control_fd;
-}
-
-int main(int argc, char* argv[]) {
-    if (argc != 2) {
-        cerr << "Usage: " << argv[0]<< " <server_ip>" << endl;
+// FTP客户端主函数
+int main(){
+    // 1. 建立控制连接
+    int control_sock=socket(AF_INET,SOCK_STREAM,0);
+    if(control_sock<0){
+        cerr << "Error creating control socket" << endl;
         return 1;
     }
 
-    string server_ip = argv[1];
-    int control_fd = ftp_login(server_ip);
-
-    while (true) {
-        cout << "FTP> ";
-        string cmd;
-        getline(cin, cmd);
-
-        if (cmd.empty()) continue;
-
-        if (cmd == "quit" || cmd == "exit") {
-            send_command(control_fd, "QUIT\r\n");
-            close(control_fd);
-            break;
-        } else if (cmd.find("list") == 0) {
-            ftp_list(control_fd);
-        } else if (cmd.find("retr") == 0) {
-            size_t space_pos = cmd.find(' ', 5);
-            if (space_pos == string::npos) {
-                cerr << "Usage: retr <filename>" << endl;
-                continue;
-            }
-            string filename = cmd.substr(space_pos + 1);
-            ftp_retr(control_fd, filename);
-        } else if (cmd.find("stor") == 0) {
-            size_t space_pos = cmd.find(' ', 5);
-            if (space_pos == string::npos) {
-                cerr << "Usage: stor <filename>" << endl;
-                continue;
-            }
-            string filename = cmd.substr(space_pos + 1);
-            ftp_stor(control_fd, filename);
-        } else {
-            cerr << "Unknown command: " << cmd << endl;
-        }
+    struct sockaddr_in server_addr{};
+    server_addr.sin_family=AF_INET;
+    server_addr.sin_port=htons(CONTROL_PORT);
+    if(inet_pton(AF_INET,SERVER_IP.c_str(),&server_addr.sin_addr)<=0){
+        cerr << "Invalid server IP: " << SERVER_IP << endl;
+        close(control_sock);
+        return 1;
     }
 
+    if(connect(control_sock,(struct sockaddr*)&server_addr,sizeof(server_addr))<0){
+        cerr << "Error connecting to control server" << endl;
+        close(control_sock);
+        return 1;
+    }
+
+    // 测试LIST命令
+    cout << "Sending LIST command..." << endl;
+    string list_response=send_command(control_sock,"PASV\r\n");  // 进入被动模式
+    auto[data_ip, data_port]=parse_pasv_response(list_response);
+    cout << "Data connection IP: " << data_ip << ", Port: " << data_port << endl;
+
+    int data_sock = connect_data(data_ip, data_port);
+    if (data_sock < 0) {
+        cerr << "Failed to connect data socket" << endl;
+        close(control_sock);
+        return 1;
+    }
+
+    send_command(control_sock, "LIST\r\n");  // 发送LIST命令
+    char buffer[4096];
+    ssize_t bytes_received;
+    while ((bytes_received = recv(data_sock, buffer, sizeof(buffer), 0)) > 0) {
+        write(STDOUT_FILENO, buffer, bytes_received);  // 打印文件列表
+    }
+    close(data_sock);
+
+    // 4. 测试RETR命令（下载文件）
+    string filename = "test.txt";  // 替换为你要下载的文件名
+    cout << "Sending RETR command for " << filename << "..." << endl;
+    list_response = send_command(control_sock, "PASV\r\n");  // 进入被动模式
+    tie(data_ip, data_port) = parse_pasv_response(list_response);
+    data_sock = connect_data(data_ip, data_port);
+    if (data_sock < 0) {
+        cerr << "Failed to connect data socket" << endl;
+        close(control_sock);
+        return 1;
+    }
+
+    send_command(control_sock, ("RETR " + filename + "\r\n").c_str());  // 发送RETR命令
+    ofstream outfile(filename, ios::binary);
+    while ((bytes_received = recv(data_sock, buffer, sizeof(buffer), 0)) > 0) {
+        outfile.write(buffer, bytes_received);  // 写入文件
+    }
+    outfile.close();
+    close(data_sock);
+
+    // 5. 测试STOR命令（上传文件）
+    filename = "upload_test.txt";  // 替换为你要上传的文件名
+    cout << "Sending STOR command for " << filename << "..." << endl;
+    list_response = send_command(control_sock, "PASV\r\n");  // 进入被动模式
+    tie(data_ip, data_port) = parse_pasv_response(list_response);
+    data_sock = connect_data(data_ip, data_port);
+    if (data_sock < 0) {
+        cerr << "Failed to connect data socket" << endl;
+        close(control_sock);
+        return 1;
+    }
+
+    send_command(control_sock, ("STOR " + filename + "\r\n").c_str());  // 发送STOR命令
+    ifstream infile(filename, ios::binary);
+    while (infile.read(buffer, sizeof(buffer))) {
+        send(data_sock, buffer, infile.gcount(), 0);  // 发送文件数据
+    }
+    send(data_sock, buffer, infile.gcount(), 0);  // 发送剩余数据
+    infile.close();
+    close(data_sock);
+
+    // 6. 关闭控制连接
+    send_command(control_sock,"QUIT\r\n");
+    close(control_sock);
+
+    cout << "FTP client finished." << endl;
     return 0;
 }
