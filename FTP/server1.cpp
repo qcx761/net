@@ -418,7 +418,7 @@ void handle_retr(int data_fd,char* filename){
 
     // 偏移量,记录offset可支持端点续传？？
 
-    off_t offset = 0;
+    off_t offset=0;
     ssize_t bytes_sent=sendfile(data_fd,file_fd,&offset,statbuf.st_size);
     
     if(bytes_sent==-1){
