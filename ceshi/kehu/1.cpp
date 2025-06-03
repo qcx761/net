@@ -14,8 +14,8 @@
 using namespace std;
 
 // FTP服务器配置
-const string SERVER_IP = "127.0.0.1";  // 替换为你的服务器IP
-const int CONTROL_PORT = 2100;        // 控制连接端口
+const string SERVER_IP="127.0.0.1";  // 替换为你的服务器IP
+const int CONTROL_PORT=2100;        // 控制连接端口
 
 // 辅助函数：发送命令并接收响应
 string send_command(int sockfd, const string& cmd){
@@ -37,7 +37,7 @@ string send_command(int sockfd, const string& cmd){
             break;  // PASV响应可能跨多个recv调用，但通常一次足够
         }
         // 如果响应以 "226" 或 "250" 开头（操作完成），可以停止
-        if(response.find("226")==0||response.find("250")==0){
+        if(response.find("226")==0||response.find("250")==0||response.find("550")==0||response.find("500")==0||response.find("426")==0){
             break;
         }
     }

@@ -160,17 +160,14 @@ int get_port(int fd){
 }
 
 void FTP_init(){
-    // int client_fd;
-    struct sockaddr_in ser_addr; //,cli_addr
-    socklen_t ser_len; // ,cli_len
+    struct sockaddr_in ser_addr; 
+    socklen_t ser_len; 
 
     memset(&ser_addr,0,sizeof(ser_addr));
-    // memset(&cli_addr,0,sizeof(cli_addr));
 
     if((server_fd=socket(AF_INET,SOCK_STREAM,0))<0){
         perror("Socket creation failed");
         exit(-1);
-        //exit(EXIT_FAILURE);
     }
 
     ser_addr.sin_family=AF_INET;
@@ -274,6 +271,7 @@ void handle_pasv(int control_fd,ConnectionGroup& group){
             char *filename=group.find_filename(control_fd);
             if(n==2){
                 handle_list(listen_fd);
+                free(filename);
             }else if(n==3){
                 handle_retr(listen_fd,filename);
                 free(filename);
@@ -281,6 +279,7 @@ void handle_pasv(int control_fd,ConnectionGroup& group){
                 handle_stor(listen_fd,filename);
                 free(filename);
             }else{
+                free(filename);
                 continue;
             }
 
@@ -288,7 +287,6 @@ void handle_pasv(int control_fd,ConnectionGroup& group){
                 unique_lock<mutex> lock(mtx);
                 is_continue=false;
             }
-            free(filename);
         }
     }    
     }
@@ -436,7 +434,7 @@ void handle_control_msg(char *buf,int server_fd,ConnectionGroup& group){ // 这�
             strcpy(str,token);
             str[strlen(str)]='\0';
         }else{
-            str[0]=='\0';
+            strcpy(str,"wuxiao");
         }
     }
 
@@ -449,12 +447,12 @@ void handle_control_msg(char *buf,int server_fd,ConnectionGroup& group){ // 这�
     }else if(strstr(buf,"LIST")!=NULL){ // 获取文件列表
         group.get_init_control(server_fd,2,str);
     }else if(strstr(buf,"RETR")!=NULL){ // 文件下载
-        if(!strcmp(str,"wuxiao"))
+        if(!strcmp(str,"wuxiao")&&str)
         group.get_init_control(server_fd,3,str);
         else
         group.get_init_control(server_fd,3,nullptr);
     }else if(strstr(buf,"STOR")!=NULL){ // 文件上传
-        if(!strcmp(str,"wuxiao"))
+        if(!strcmp(str,"wuxiao")&&str)
         group.get_init_control(server_fd,4,str);
         else
         group.get_init_control(server_fd,4,nullptr);
@@ -493,7 +491,7 @@ void FTP_start(ConnectionGroup& group){
             }
             if(events[i].data.fd==server_fd){ // 客户端连接
                 std::thread client_thread(handle_accept,server_fd,std::ref(group));
-                client_thread.detach();
+                client_thread.join();
             }
             else{ // 数据连接和控制连接触发
                 int fd=events[i].data.fd;
@@ -524,7 +522,6 @@ void FTP_start(ConnectionGroup& group){
                     }else{ // 不知道还有啥
                         return;
                     }
-
                 }
             }
         }
@@ -544,13 +541,3 @@ int main(){
 
     // epdf  server——fd   event封装
 }
-
-// 线程池设计
-// 控制连接线程池:
-
-// 用于处理客户端的控制连接和命令（如 USER、PASS、PASV 等）。
-// 每当有新的控制连接时，从这个线程池中获取一个线程来处理。
-// 数据连接线程池:
-
-// 用于处理数据传输（如文件上传和下载）。
-// 当在控制连接中接收到 PASV 命令并建立数据连接后，从这个线程池中获取一个线程来处理数据传输。
