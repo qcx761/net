@@ -20,6 +20,9 @@
 #include <sys/sendfile.h>
 
 
+#include <ifaddrs.h>  // 包含网络接口信息（包含 ifaddrs 结构体）
+#include <linux/if.h> // 包含网络接口标志（如 IFF_UP, IFF_RUNNING）
+
 using namespace std;
 
 #define PORT 2100
@@ -27,6 +30,7 @@ using namespace std;
 #define SIZE 1024
 #define EPSIZE 1024
 #define maxevents 1024
+#define INET_ADDRSTRLEN 16
 
 
 
@@ -47,7 +51,18 @@ class ControlConnect{
         int n;
         ControlConnect(int fd,int m,char* buf):control_fd(fd){
         n=m;
+
+
+
+
+        if(buf)
         strcpy(filename,buf);
+        else
+        strcpy(filename,"wuxiao");
+
+
+
+
         }
         void set_msg(int m){
             n=m;
@@ -72,8 +87,10 @@ class ConnectionGroup{
         // 初始化控制连接
         void get_init_control(int fd,int n,char* buf){ // 判断fd是否存在，存在就修改，不存在初始化
 
+
             auto it=std::find_if(control_connections.begin(),control_connections.end(),[fd](const ControlConnect& conn){return conn.control_fd==fd;});
         
+
             if(it==control_connections.end()){
             control_connections.emplace_back(fd,n,buf);
             }else{
@@ -83,6 +100,7 @@ class ConnectionGroup{
                 }
                 it->set_msg(n);
             }
+
         }
 
         // 初始化数据连接
@@ -176,13 +194,13 @@ void FTP_init(){
     ser_len=sizeof(ser_addr);
 
     if(bind(server_fd,(struct sockaddr *)&ser_addr,ser_len)<0){
-        perror("Bind failed");
+        perror("Bind0 failed");
         close(server_fd);
         exit(-1);
     }
 
     if(listen(server_fd,5)<0){
-        perror("Listen failed");
+        perror("Listen0 failed");
         close(server_fd);
         exit(-1);
     }
@@ -203,13 +221,41 @@ void FTP_init(){
 
     //记得close(epdf)
 }
-    
 
 
+std::string get_server_ip() {
+    struct ifaddrs *ifaddr, *ifa;
+    if (getifaddrs(&ifaddr) == -1) {
+        perror("getifaddrs failed");
+        return "0.0.0.0";  // 失败时返回默认值
+    }
+
+    std::string server_ip = "0.0.0.0";
+    for (ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+        // 只处理IPv4地址
+        if (ifa->ifa_addr == nullptr || ifa->ifa_addr->sa_family != AF_INET) {
+            continue;
+        }
+
+        struct sockaddr_in *sa = (struct sockaddr_in *)ifa->ifa_addr;
+        char ip_str[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &sa->sin_addr, ip_str, sizeof(ip_str));
+
+        // 过滤掉回环地址（127.0.0.1）和未启用的接口
+        if (strcmp(ip_str, "127.0.0.1") != 0 && 
+            (ifa->ifa_flags & IFF_UP) && (ifa->ifa_flags & IFF_RUNNING)) {
+            server_ip = ip_str;  // 返回第一个符合条件的IP
+            break;  // 可以修改逻辑选择特定IP（如优先选择eth0）
+        }
+    }
+    freeifaddrs(ifaddr);
+    return server_ip;
+}
 
 
 // 数据连接创建
 void handle_pasv(int control_fd,ConnectionGroup& group){
+    cout << "creating...data_connection..." << endl;
 
         
         srand(time(NULL));
@@ -219,23 +265,27 @@ void handle_pasv(int control_fd,ConnectionGroup& group){
 
         int listen_fd=socket(AF_INET,SOCK_STREAM,0);
         if(listen_fd==-1){
-            perror("socket failed");
+            perror("socket1 failed");
             return;
         }
 
         struct sockaddr_in addr{};
         addr.sin_family=AF_INET;
-        addr.sin_addr.s_addr=INADDR_ANY;
+        std::string ip = get_server_ip();
+        inet_pton(AF_INET,ip.c_str(), &addr.sin_addr);
+
+
+        //addr.sin_addr.s_addr=INADDR_ANY;
+
         addr.sin_port=htons(port);
-        
         if(bind(listen_fd,(struct sockaddr*)&addr,sizeof(addr))==-1){
-            perror("bind failed");
+            perror("bind1 failed");
             close(listen_fd);
             return;
         }
 
         if(listen(listen_fd,5)==-1){
-            perror("listen failed");
+            perror("listen1 failed");
             close(listen_fd);
             return;
         }
@@ -244,7 +294,7 @@ void handle_pasv(int control_fd,ConnectionGroup& group){
 
         socklen_t len=sizeof(addr);
         if(getsockname(listen_fd,(struct sockaddr*)&addr,&len)==-1){
-            perror("getsockname failed");
+            perror("getsockname1 failed");
             return;
         }
 
@@ -260,7 +310,7 @@ void handle_pasv(int control_fd,ConnectionGroup& group){
         struct epoll_event ev;
         ev.data.fd=listen_fd;
         ev.events = EPOLLIN|EPOLLOUT|EPOLLET|EPOLLRDHUP|EPOLLERR;
-        if(epoll_ctl(epfd,EPOLL_CTL_ADD,server_fd,&ev)==-1){
+        if(epoll_ctl(epfd,EPOLL_CTL_ADD,listen_fd,&ev)==-1){
             perror("epoll_ctl failed");
             return;
         }
@@ -289,7 +339,9 @@ void handle_pasv(int control_fd,ConnectionGroup& group){
             }
         }
     }    
-    }
+}
+
+
 
 // 数据连接fd
 void handle_list(int data_fd){ // 传输目录下的文件
@@ -308,7 +360,25 @@ void handle_list(int data_fd){ // 传输目录下的文件
             continue;
         }
         snprintf(buffer,sizeof(buffer),"%s\r\n",entry->d_name);
-        send(data_fd,buffer,strlen(buffer),0);
+        ssize_t bytes_sent=send(data_fd,buffer,strlen(buffer),0);
+        if(bytes_sent==-1){
+            if(errno==EPIPE){
+                // 客户端已断开连接，退出循环
+                break;
+            }else{
+                // 其他错误（如网络问题），记录日志或处理
+                perror("send failed");
+                break;
+            }
+        }
+
+
+// 管道裂开了？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？
+// ？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？
+
+
+
+
     }
 
     closedir(dir);
@@ -317,9 +387,9 @@ void handle_list(int data_fd){ // 传输目录下的文件
 
 
 
-// 服务端将指定的文件传输给客户端
 
-// 文件较大可以分块传输？？  实现？？
+
+// 服务端将指定的文件传输给客户端
 void handle_retr(int data_fd,char* filename){
     int file_fd=open(filename,O_RDONLY);
     if(file_fd==-1){
@@ -441,7 +511,12 @@ void handle_control_msg(char *buf,int server_fd,ConnectionGroup& group){ // 这�
 {
     unique_lock<mutex> lock(mtx);
     if(strstr(buf,"PASV")!=NULL){ // 处理数据连接
+
+
         group.get_init_control(server_fd,1,nullptr);
+
+
+
         std::thread client_thread(handle_pasv,server_fd,std::ref(group));
         client_thread.detach();
     }else if(strstr(buf,"LIST")!=NULL){ // 获取文件列表
