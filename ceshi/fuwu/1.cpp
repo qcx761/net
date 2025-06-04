@@ -18,6 +18,7 @@
 #include <unordered_map>
 #include <algorithm>  
 #include <sys/sendfile.h>
+#include <condition_variable>
 
 
 #include <ifaddrs.h>  // 包含网络接口信息（包含 ifaddrs 结构体）
@@ -33,16 +34,62 @@ using namespace std;
 #define INET_ADDRSTRLEN 16
 
 
-
+std::condition_variable cv;
 std::mutex mtx; // 互斥锁
+std::mutex mtx1; // 互斥锁
 int epfd;
 int server_fd;// 全局变量
-bool is_continue;
+bool is_continue=false;
 
 
 void handle_list(int data_fd);
 void handle_retr(int data_fd,char* filename);
 void handle_stor(int data_fd,char *filename);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// filename加锁
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 class ControlConnect{
     public:
@@ -50,47 +97,27 @@ class ControlConnect{
         char filename[100];
         int n;
         ControlConnect(int fd,int m,char* buf):control_fd(fd){
-        n=m;
-
-
-
-
-        if(buf)
-        strcpy(filename,buf);
-        else
-        strcpy(filename,"wuxiao");
-
-
-
-
+            n=m;
+            if(buf){
+                strcpy(filename,buf);
+            }
+            else{
+                strcpy(filename,"wuxiao");
+            }
         }
+
         void set_msg(int m){
             n=m;
         }
 };
-    
-class DataConnect{
-    public:
-        int data_fd; // 数据连接的文件描述符
-        DataConnect(int fd):data_fd(fd){
-            ;
-        }
-};
-
 
 class ConnectionGroup{
     public:
         std::vector<ControlConnect> control_connections;
-        std::vector<DataConnect> data_connections;
-        std::unordered_map<int,int> data_to_control;
 
         // 初始化控制连接
         void get_init_control(int fd,int n,char* buf){ // 判断fd是否存在，存在就修改，不存在初始化
-
-
             auto it=std::find_if(control_connections.begin(),control_connections.end(),[fd](const ControlConnect& conn){return conn.control_fd==fd;});
-        
-
             if(it==control_connections.end()){
             control_connections.emplace_back(fd,n,buf);
             }else{
@@ -103,40 +130,11 @@ class ConnectionGroup{
 
         }
 
-        // 初始化数据连接
-        void get_init_data(int data_fd){
-            data_connections.emplace_back(data_fd);
-        }
-
-        // 添加连接（control_fd 和 data_fd 关联）
-        void add_connection(int control_fd,int data_fd){                                 // 好像没用。。。。。。   要关联吗？？？？？
-
-            data_to_control[data_fd]=control_fd;  // 存储反向映射
-        }
-
-        // 通过 data_fd 查找 control_fd
-        int find_control_fd(int data_fd){
-            auto it=data_to_control.find(data_fd);
-            if(it!=data_to_control.end()){
-                return it->second;
-            }
-            return -1;  // 未找到
-        }
-
         void remove_control_connection(int fd){
             auto it=std::find_if(control_connections.begin(),control_connections.end(),[fd](const ControlConnect& conn){return conn.control_fd==fd;});
         
             if(it!=control_connections.end()){
                 control_connections.erase(it);  // 删除单个元素
-            }
-        
-            // 清理data_to_control中指向该control_fd的映射
-            for(auto it=data_to_control.begin();it!=data_to_control.end();){
-                if(it->second==fd){
-                    it=data_to_control.erase(it);  // 删除并返回下一个迭代器
-                }else{
-                    ++it;
-                }
             }
         }
         
@@ -255,8 +253,6 @@ std::string get_server_ip() {
 
 // 数据连接创建
 void handle_pasv(int control_fd,ConnectionGroup& group){
-    cout << "creating...data_connection..." << endl;
-
         
         srand(time(NULL));
         int port=rand()%40000+1024;
@@ -290,7 +286,7 @@ void handle_pasv(int control_fd,ConnectionGroup& group){
             return;
         }
         
-        fcntl(listen_fd,F_SETFL,O_NONBLOCK);
+        // fcntl(listen_fd,F_SETFL,O_NONBLOCK);
 
         socklen_t len=sizeof(addr);
         if(getsockname(listen_fd,(struct sockaddr*)&addr,&len)==-1){
@@ -307,26 +303,41 @@ void handle_pasv(int control_fd,ConnectionGroup& group){
         sprintf(arr,"227 entering passive mode (%s,%s,%s,%s,%d,%d)",str[0],str[1],str[2],str[3],p1,p2);
         send(control_fd,arr,sizeof(arr),0);  // 通过控制连接发送信息
 
+
+        sockaddr_in server_addr{};
+        socklen_t server_len=sizeof(server_addr);
+        int data_fd=accept(listen_fd,(sockaddr*)&server_addr,&server_len);
+        if(data_fd==-1){
+            perror("accept");
+            return;
+        }
+
+
         struct epoll_event ev;
-        ev.data.fd=listen_fd;
+        ev.data.fd=data_fd;
         ev.events = EPOLLIN|EPOLLOUT|EPOLLET|EPOLLRDHUP|EPOLLERR;
-        if(epoll_ctl(epfd,EPOLL_CTL_ADD,listen_fd,&ev)==-1){
+        if(epoll_ctl(epfd,EPOLL_CTL_ADD,data_fd,&ev)==-1){
             perror("epoll_ctl failed");
             return;
         }
 
+        cout << "data_connection created" << endl;
+
         while(1){
-        if(is_continue){
+            {
+                unique_lock<mutex> lock(mtx);
+                cv.wait(lock,[]{return is_continue;});
+            }
             int n=group.find_n(control_fd);
             char *filename=group.find_filename(control_fd);
             if(n==2){
-                handle_list(listen_fd);
+                handle_list(data_fd);
                 free(filename);
             }else if(n==3){
-                handle_retr(listen_fd,filename);
+                handle_retr(data_fd,filename);
                 free(filename);
             }else if(n==4){
-                handle_stor(listen_fd,filename);
+                handle_stor(data_fd,filename);
                 free(filename);
             }else{
                 free(filename);
@@ -337,13 +348,12 @@ void handle_pasv(int control_fd,ConnectionGroup& group){
                 unique_lock<mutex> lock(mtx);
                 is_continue=false;
             }
-        }
     }    
 }
 
 
 
-// 数据连接fd
+
 void handle_list(int data_fd){ // 传输目录下的文件
     DIR *dir;
     struct dirent *entry;
@@ -354,7 +364,6 @@ void handle_list(int data_fd){ // 传输目录下的文件
         send(data_fd,"550 Failed to open directory.\r\n",30,0);
         return;
     }
-
     while((entry=readdir(dir))!=NULL){
         if(strcmp(entry->d_name,".")==0||strcmp(entry->d_name,"..")==0){
             continue;
@@ -371,16 +380,7 @@ void handle_list(int data_fd){ // 传输目录下的文件
                 break;
             }
         }
-
-
-// 管道裂开了？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？
-// ？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？
-
-
-
-
     }
-
     closedir(dir);
     send(data_fd,"226 Transfer complete.\r\n",24,0);
 }
@@ -391,6 +391,8 @@ void handle_list(int data_fd){ // 传输目录下的文件
 
 // 服务端将指定的文件传输给客户端
 void handle_retr(int data_fd,char* filename){
+
+
     int file_fd=open(filename,O_RDONLY);
     if(file_fd==-1){
         send(data_fd,"550 File not found.\r\n",20,0);
@@ -491,7 +493,7 @@ void handle_accept(int fd,ConnectionGroup& group){
 
 
 
-void handle_control_msg(char *buf,int server_fd,ConnectionGroup& group){ // 这个锁奇奇怪怪的
+void handle_control_msg(char *buf,int server_fd,ConnectionGroup& group){ 
     size_t length=strlen(buf);
     char buf_copy[256];
     char str[128];
@@ -507,16 +509,9 @@ void handle_control_msg(char *buf,int server_fd,ConnectionGroup& group){ // 这�
             strcpy(str,"wuxiao");
         }
     }
-
-{
-    unique_lock<mutex> lock(mtx);
     if(strstr(buf,"PASV")!=NULL){ // 处理数据连接
-
-
         group.get_init_control(server_fd,1,nullptr);
-
-
-
+        cout << "creating data_connection..." << endl;
         std::thread client_thread(handle_pasv,server_fd,std::ref(group));
         client_thread.detach();
     }else if(strstr(buf,"LIST")!=NULL){ // 获取文件列表
@@ -538,9 +533,12 @@ void handle_control_msg(char *buf,int server_fd,ConnectionGroup& group){ // 这�
     }else{ // 其他命令
         send(server_fd,"500 Unknown command\r\n",21,0);
     }
-    is_continue=true;
 
-}
+    {
+    unique_lock<mutex> lock(mtx);
+    is_continue=true;
+    cv.notify_one();
+    }
 }
 
 
@@ -585,6 +583,7 @@ void FTP_start(ConnectionGroup& group){
                         buf[len]='\0';
                         // auto future1=control_pool.enqueue(handle_control_msg,buf,fd,group);
                         // future1.get();
+                        cout << "命令: " << buf;
                         handle_control_msg(buf,fd,group);
                     } 
                 }else{ // 数据连接
