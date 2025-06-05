@@ -12,7 +12,6 @@
 #include <pthread.h>
 #include <ctime>
 #include <thread>
-#include <sys/sendfile.h>
 #include <mutex>
 #include <vector>
 #include <unordered_map>
@@ -37,6 +36,7 @@ using namespace std;
 std::condition_variable cv;
 std::mutex mtx; // 互斥锁
 std::mutex mtx1; // 互斥锁
+std::mutex mtx2; // 互斥锁
 int epfd;
 int server_fd;// 全局变量
 bool is_continue=false;
@@ -47,50 +47,6 @@ void handle_retr(int data_fd,char* filename);
 void handle_stor(int data_fd,char *filename);
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-// filename加锁
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 class ControlConnect{
     public:
         int control_fd; // 控制连接的文件描述符
@@ -99,15 +55,28 @@ class ControlConnect{
         ControlConnect(int fd,int m,char* buf):control_fd(fd){
             n=m;
             if(buf){
+                std::lock_guard<std::mutex> lock(mtx1);
                 strcpy(filename,buf);
             }
             else{
-                strcpy(filename,"wuxiao");
+                std::lock_guard<std::mutex> lock(mtx1);
+                strcpy(filename,"false");
             }
         }
 
         void set_msg(int m){
+            std::lock_guard<std::mutex> lock(mtx2);
             n=m;
+        }
+
+        void set_filename(const char* buf){
+            std::lock_guard<std::mutex> lock(mtx1);
+            strcpy(filename,buf);
+        }
+    
+        const char* get_filename(){
+            std::lock_guard<std::mutex> lock(mtx1);
+            return filename;
         }
 };
 
@@ -123,7 +92,8 @@ class ConnectionGroup{
             }else{
                 // 修改参数
                 if(buf){
-                strcpy(it->filename,buf);
+                // strcpy(it->filename,buf);
+                it->set_filename(buf);
                 }
                 it->set_msg(n);
             }
@@ -157,7 +127,7 @@ class ConnectionGroup{
                 return b;
             }else{
                 char* a=(char *)malloc(sizeof(char)*100);
-                strcpy(a,it->filename);
+                strcpy(a,it->get_filename());
                 return a;
             }
         }
@@ -330,16 +300,28 @@ void handle_pasv(int control_fd,ConnectionGroup& group){
             }
             int n=group.find_n(control_fd);
             char *filename=group.find_filename(control_fd);
+
+
+
+//cout << "111"<<endl;
+
             if(n==2){
+//cout << "111"<<endl;
+
                 handle_list(data_fd);
                 free(filename);
             }else if(n==3){
+//cout << "111"<<endl;
+
                 handle_retr(data_fd,filename);
                 free(filename);
             }else if(n==4){
+//cout << "111"<<endl;
+
                 handle_stor(data_fd,filename);
                 free(filename);
             }else{
+
                 free(filename);
                 continue;
             }
@@ -513,16 +495,18 @@ void handle_control_msg(char *buf,int server_fd,ConnectionGroup& group){
         group.get_init_control(server_fd,1,nullptr);
         cout << "creating data_connection..." << endl;
         std::thread client_thread(handle_pasv,server_fd,std::ref(group));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50)); // 等待50毫秒建立数据连接
         client_thread.detach();
+        return;
     }else if(strstr(buf,"LIST")!=NULL){ // 获取文件列表
         group.get_init_control(server_fd,2,str);
     }else if(strstr(buf,"RETR")!=NULL){ // 文件下载
-        if(!strcmp(str,"wuxiao")&&str)
+        if(strcmp(str,"wuxiao")!=0)
         group.get_init_control(server_fd,3,str);
         else
         group.get_init_control(server_fd,3,nullptr);
     }else if(strstr(buf,"STOR")!=NULL){ // 文件上传
-        if(!strcmp(str,"wuxiao")&&str)
+        if(strcmp(str,"wuxiao")!=0)
         group.get_init_control(server_fd,4,str);
         else
         group.get_init_control(server_fd,4,nullptr);
@@ -583,7 +567,7 @@ void FTP_start(ConnectionGroup& group){
                         buf[len]='\0';
                         // auto future1=control_pool.enqueue(handle_control_msg,buf,fd,group);
                         // future1.get();
-                        cout << "命令: " << buf;
+                        cout << "命令: " << buf << endl;
                         handle_control_msg(buf,fd,group);
                     } 
                 }else{ // 数据连接
@@ -615,3 +599,8 @@ int main(){
 
     // epdf  server——fd   event封装
 }
+
+
+
+
+// 多线程唤醒有问题std::map<int, std::condition_variable>

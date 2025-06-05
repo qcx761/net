@@ -144,7 +144,7 @@ void data_connection_thread(){
     char buffer[4096];
     ssize_t bytes_received;
     while((bytes_received=recv(data_sock,buffer,sizeof(buffer),0))>0){
-        cout<<buffer;
+        cout<<buffer<<endl;
     }
     if(bytes_received<0)
         cerr<<"Error receiving data"<<endl;
