@@ -1,207 +1,223 @@
 #include <iostream>
-#include <string>
-#include <cstring>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <unistd.h>
-#include <netdb.h>
-#include <vector>
-#include <sstream>
-#include <fstream>
+#include <cstring>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <fcntl.h>
 #include <thread>
-#include <algorithm>
-#include <mutex>
-#include <condition_variable>
+#include <chrono>
+#include <cstdio>
 
 using namespace std;
 
-const string SERVER_IP="127.0.0.1";
-const int CONTROL_PORT=2100;
+#define CONTROL_PORT 2100
+#define DATA_PORT_MIN 1024
+#define DATA_PORT_MAX 49151
+#define INET_ADDRSTRLEN 16
 
-mutex mtx;
-condition_variable cv;
-bool pasv_ready=false;
-pair<string,int> data_conn_info;
-bool data_conn_established=false;
+class FTPClient {
+public:
+    FTPClient(const string& server_ip) : server_ip(server_ip), control_fd(-1), data_fd(-1), is_connected(false) {}
 
-string send_command(int sockfd,const string& cmd){
-    if(send(sockfd,cmd.c_str(),cmd.size(),0)<0){
-        cerr<<"Error sending command: "<<cmd<<endl;
-        return "";
+    ~FTPClient() {
+        if (control_fd != -1) close(control_fd);
+        if (data_fd != -1) close(data_fd);
     }
-    char buffer[1024];
-    string response;
-    ssize_t bytes_received;
-    while((bytes_received=recv(sockfd,buffer,sizeof(buffer)-1,0))>0){
-        buffer[bytes_received]='\0';
-        response+=buffer;
-        if(response.find("227")==0||response.find("226")==0||response.find("250")==0||response.find("550")==0||response.find("500")==0||response.find("426")==0)
-            break;
-    }
-    if(bytes_received<0)cerr<<"Error receiving response"<<endl;
-    return response;
-}
 
-pair<string,int>parse_pasv_response(const string& response){
-    size_t start=response.find("(");
-    size_t end=response.find(")");
-    if(start==string::npos||end==string::npos){
-        cerr<<"Invalid PASV response format"<<endl;
-        return {"",0};
-    }
-    string ip_port_str=response.substr(start+1,end-start-1);
-    vector<string> parts;
-    stringstream str(ip_port_str);
-    string part;
-    while(getline(str,part,','))parts.push_back(part);
-    if(parts.size()<6){
-        cerr<<"Invalid PASV response format"<<endl;
-        return {"",0};
-    }
-    string ip=parts[0]+"."+parts[1]+"."+parts[2]+"."+parts[3];
-    int p1=stoi(parts[4]);
-    int p2=stoi(parts[5]);
-    return {ip,p1 * 256+p2};
-}
-
-int connect_data(const string& ip,int port){
-    int sockfd=socket(AF_INET,SOCK_STREAM,0);
-    if(sockfd<0){
-        cerr<<"Error creating data socket"<<endl;
-        return -1;
-    }
-    struct sockaddr_in server_addr{};
-    server_addr.sin_family=AF_INET;
-    server_addr.sin_port=htons(port);
-    if(inet_pton(AF_INET,ip.c_str(),&server_addr.sin_addr)<=0){
-        cerr<<"Invalid IP address: "<<ip<<endl;close(sockfd);
-        return -1;
-    }
-    if(connect(sockfd,(struct sockaddr*)&server_addr,sizeof(server_addr))<0){
-        cerr<<"Error connecting to data server"<<endl;
-        close(sockfd);
-        return -1;
-    }
-    return sockfd;
-}
-
-void control_connection_thread(int control_sock){
-    // 进入被动模式
-    string pasv_response=send_command(control_sock,"PASV\r\n");
-    auto [data_ip,data_port]=parse_pasv_response(pasv_response);
-    cout<<"Data connection IP: "<<data_ip<<", Port: "<<data_port<<endl;
-    
-    // 通知数据连接线程
-    {
-        lock_guard<mutex> lock(mtx);
-        data_conn_info={data_ip,data_port};
-        pasv_ready=true;
-    }
-    cv.notify_one();
-    
-    // 等待数据连接建立
-    {
-        unique_lock<mutex> lock(mtx);
-        cv.wait(lock,[](){return data_conn_established;});
-    }
-    
-    // 发送LIST命令
-    send_command(control_sock,"LIST\r\n");
-    
-    // 发送STOR命令（示例：上传文件）
-    string filename="upload_test.txt"; // 上传的文件名
-    send_command(control_sock,("STOR "+filename+"\r\n").c_str());
-    
-    // 发送RETR命令（示例：下载文件）
-    string retr_filename="test.txt"; // 下载的文件名
-    send_command(control_sock,("RETR "+retr_filename+"\r\n").c_str());
-    
-    // 关闭控制连接
-    send_command(control_sock,"QUIT\r\n");
-    close(control_sock);
-}
-
-void data_connection_thread(){
-    // 等待PASV响应
-    {
-        unique_lock<mutex> lock(mtx);
-        cv.wait(lock,[](){return pasv_ready;});
-    }
-    
-    // 建立数据连接
-    int data_sock=connect_data(data_conn_info.first,data_conn_info.second);
-    if(data_sock<0){cerr<<"Failed to connect data socket"<<endl;return;}
-    
-    // 通知控制连接线程数据连接已建立
-    {
-        lock_guard<mutex> lock(mtx);
-        data_conn_established=true;
-    }
-    cv.notify_one();
-    
-    // 接收数据（LIST响应）
-
-    char buffer[4096];
-    ssize_t bytes_received;
-    while((bytes_received=recv(data_sock,buffer,sizeof(buffer),0))>0){
-        cout<<buffer<<endl;
-    }
-    if(bytes_received<0)
-        cerr<<"Error receiving data"<<endl;
-    
-    // 处理STOR命令（上传文件）
-    ifstream infile("upload_test.txt"); // 上传的文件名
-    if(infile.is_open()){
-        while(infile.read(buffer,sizeof(buffer))){
-            send(data_sock,buffer,infile.gcount(),0);
+    bool connect_to_server() {
+        control_fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (control_fd < 0) {
+            perror("socket failed");
+            return false;
         }
-        send(data_sock,buffer,infile.gcount(),0); // 发送剩余数据
-        infile.close();
-    }else{
-        cerr<<"Failed to open file for upload"<<endl;
-    }
-    
-    // 处理RETR命令（下载文件）
-    ofstream outfile("test.txt"); // 下载的文件名
-    if(outfile.is_open()){
-        while((bytes_received=recv(data_sock,buffer,sizeof(buffer),0))>0){
-            outfile.write(buffer,bytes_received);
-        }
-        if(bytes_received<0)
-            cerr<<"Error receiving data"<<endl;
-        outfile.close();
-    }else{
-        cerr<<"Failed to open file for download"<<endl;
-    }
-    
-    close(data_sock);
-}
 
-int main(){
-    int control_sock=socket(AF_INET,SOCK_STREAM,0);
-    if(control_sock<0){
-        cerr<<"Error creating control socket"<<endl;
+        sockaddr_in server_addr{};
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_port = htons(CONTROL_PORT);
+        if (inet_pton(AF_INET, server_ip.c_str(), &server_addr.sin_addr) <= 0) {
+            perror("inet_pton failed");
+            return false;
+        }
+
+        if (connect(control_fd, (sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+            perror("connect failed");
+            return false;
+        }
+
+        is_connected = true;
+        cout << "Connected to server: " << server_ip << ":" << CONTROL_PORT << endl;
+        return true;
+    }
+
+    void close_connection() {
+        if (control_fd != -1) {
+            close(control_fd);
+            control_fd = -1;
+        }
+        if (data_fd != -1) {
+            close(data_fd);
+            data_fd = -1;
+        }
+        is_connected = false;
+    }
+
+    void send_command(const string& cmd) {
+        if (is_connected) {
+            send(control_fd, cmd.c_str(), cmd.size(), 0);
+        }
+    }
+
+    string receive_response() {
+        char buf[1024];
+        ssize_t len = recv(control_fd, buf, sizeof(buf) - 1, 0);
+        if (len <= 0) {
+            perror("recv failed");
+            return "";
+        }
+        buf[len] = '\0';
+        return string(buf);
+    }
+
+    void pasv_mode() {
+        send_command("PASV\n");
+        string response = receive_response();
+        cout << "PASV Response: " << response << endl;
+
+        if (response.find("200 OK") != string::npos) {
+            // Parse the PASV response to get the data port
+            size_t start = response.find('(') + 1;
+            size_t end = response.find(')', start);
+            string pasv_info = response.substr(start, end - start);
+
+            // Extract the port number
+            size_t first_comma = pasv_info.find(',');
+            size_t second_comma = pasv_info.find(',', first_comma + 1);
+            size_t third_comma = pasv_info.find(',', second_comma + 1);
+            int p1 = stoi(pasv_info.substr(second_comma + 1, third_comma - second_comma - 1));
+            int p2 = stoi(pasv_info.substr(third_comma + 1));
+            int data_port = p1 * 256 + p2;
+
+            // Connect to the data port
+            connect_data_socket(data_port);
+        }
+    }
+
+    void list_files() {
+        send_command("LIST\n");
+        string response = receive_response();
+        cout << "LIST Response: " << response << endl;
+
+        if (response.find("200 OK") != string::npos) {
+            // Receive the file list through the data connection
+            char buf[1024];
+            ssize_t len = recv(data_fd, buf, sizeof(buf) - 1, 0);
+            if (len > 0) {
+                buf[len] = '\0';
+                cout << "File List:\n" << buf << endl;
+            }
+        }
+    }
+
+    void upload_file(const string& filename) {
+        send_command("STOR " + filename + "\n");
+        string response = receive_response();
+        cout << "STOR Response: " << response << endl;
+
+        if (response.find("200 OK") != string::npos) {
+            // Open the file and send its content through the data connection
+            int file_fd = open(filename.c_str(), O_RDONLY);
+            if (file_fd < 0) {
+                perror("open file failed");
+                return;
+            }
+
+            char buf[4096];
+            ssize_t len;
+            while ((len = read(file_fd, buf, sizeof(buf))) > 0) {
+                send(data_fd, buf, len, 0);
+            }
+            close(file_fd);
+        }
+    }
+
+    void download_file(const string& filename) {
+        send_command("RETR " + filename + "\n");
+        string response = receive_response();
+        cout << "RETR Response: " << response << endl;
+
+        if (response.find("200 OK") != string::npos) {
+            // Receive the file content through the data connection
+            int file_fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+            if (file_fd < 0) {
+                perror("create file failed");
+                return;
+            }
+
+            char buf[4096];
+            ssize_t len;
+            while ((len = recv(data_fd, buf, sizeof(buf), 0)) > 0) {
+                write(file_fd, buf, len);
+            }
+            close(file_fd);
+        }
+    }
+
+private:
+    string server_ip;
+    int control_fd;
+    int data_fd;
+    bool is_connected;
+
+    void connect_data_socket(int port) {
+        data_fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (data_fd < 0) {
+            perror("socket failed");
+            return;
+        }
+
+        sockaddr_in data_addr{};
+        data_addr.sin_family = AF_INET;
+        data_addr.sin_port = htons(port);
+        data_addr.sin_addr.s_addr = INADDR_ANY;
+
+        if (connect(data_fd, (sockaddr*)&data_addr, sizeof(data_addr)) < 0) {
+            perror("connect data socket failed");
+            close(data_fd);
+            data_fd = -1;
+        } else {
+            cout << "Connected to data port " << port << endl;
+        }
+    }
+};
+
+int main() {
+    string server_ip;
+    cout << "Enter the server IP address: ";
+    cin >> server_ip;
+
+    FTPClient client(server_ip);
+    if (!client.connect_to_server()) {
+        cerr << "Failed to connect to server!" << endl;
         return 1;
     }
-    struct sockaddr_in server_addr{};
-    server_addr.sin_family=AF_INET;
-    server_addr.sin_port=htons(CONTROL_PORT);
-    if(inet_pton(AF_INET,SERVER_IP.c_str(),&server_addr.sin_addr)<=0){
-        cerr<<"Invalid server IP: "<<SERVER_IP<<endl;close(control_sock);
-        return 1;
-    }
-    if(connect(control_sock,(struct sockaddr*)&server_addr,sizeof(server_addr))<0){
-        cerr<<"Error connecting to control server"<<endl;close(control_sock);
-        return 1;
-    }
-    thread control_thread(control_connection_thread,control_sock);
-    thread data_thread(data_connection_thread);
-    control_thread.join();
-    data_thread.join();
-    cout<<"FTP client finished."<<endl;
+
+    // Request PASV mode (passive mode)
+    client.pasv_mode();
+
+    // List files in the current directory
+    client.list_files();
+
+    // Upload a file (change the filename to one you want to upload)
+    string upload_filename = "test_upload.txt";
+    client.upload_file(upload_filename);
+
+    // Download a file (change the filename to one you want to download)
+    string download_filename = "test_download.txt";
+    client.download_file(download_filename);
+
+    client.close_connection();
+
     return 0;
 }
-
-
-
