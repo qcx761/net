@@ -10,171 +10,200 @@
 
 using namespace std;
 
-const string SERVER_IP = "127.0.0.1";
-const int CONTROL_PORT = 2100;
+const string SERVER_IP="127.0.0.1";
+const int CONTROL_PORT=2100;
 
-string send_command(int sockfd, const string &cmd) {
-    send(sockfd, cmd.c_str(), cmd.length(), 0);
-    char buffer[4096];
-    string response;
-    ssize_t n;
-    while ((n = recv(sockfd, buffer, sizeof(buffer) - 1, 0)) > 0) {
-        buffer[n] = '\0';
-        response += buffer;
-        if (response.find("\r\n") != string::npos)
-            break;
-    }
-    cout << "[SERVER] " << response;
-    return response;
-}
+class FTPClient {
+public:
+    FTPClient(const string& server_ip,int control_port):server_ip(server_ip),control_port(control_port),control_sock(-1){}
 
-pair<string, int> parse_pasv_response(const string &response) {
-    size_t start = response.find("(");
-    size_t end = response.find(")");
-    if (start == string::npos || end == string::npos)
-        return {"", 0};
+    bool connectToServer() {
+        control_sock=socket(AF_INET,SOCK_STREAM,0);
+        if(control_sock<0) {
+            cerr << "Failed to create control socket\n";
+            return false;
+        }
 
-    string ip_port = response.substr(start + 1, end - start - 1);
-    stringstream ss(ip_port);
-    string token;
-    vector<int> parts;
+        sockaddr_in server_addr{};
+        server_addr.sin_family=AF_INET;
+        server_addr.sin_port=htons(control_port);
+        inet_pton(AF_INET,server_ip.c_str(),&server_addr.sin_addr);
 
-    while (getline(ss, token, ',')) {
-        parts.push_back(stoi(token));
-    }
+        if(connect(control_sock,(sockaddr *)&server_addr,sizeof(server_addr))<0) {
+            cerr << "Failed to connect to server\n";
+            close(control_sock);
+            return false;
+        }
 
-    string ip = to_string(parts[0]) + "." + to_string(parts[1]) + "." +
-                to_string(parts[2]) + "." + to_string(parts[3]);
-    int port = parts[4] * 256 + parts[5];
-
-    return {ip, port};
-}
-
-int connect_data_socket(const string &ip, int port) {
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) return -1;
-
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    inet_pton(AF_INET, ip.c_str(), &addr.sin_addr);
-
-    if (connect(sockfd, (sockaddr *)&addr, sizeof(addr)) < 0) {
-        close(sockfd);
-        return -1;
-    }
-    return sockfd;
-}
-
-void handle_list(int control_sock) {
-    auto pasv_response = send_command(control_sock, "PASV\r\n");
-    auto [ip, port] = parse_pasv_response(pasv_response);
-
-    int data_sock = connect_data_socket(ip, port);
-    if (data_sock < 0) {
-        cerr << "Failed to connect data socket\n";
-        return;
+        // Read welcome message
+        char buffer[1024];
+        recv(control_sock,buffer,sizeof(buffer),0);
+        cout << "[SERVER] " << buffer;
+        return true;
     }
 
-    send_command(control_sock, "LIST\r\n");
-
-    char buffer[4096];
-    ssize_t n;
-    while ((n = recv(data_sock, buffer, sizeof(buffer), 0)) > 0) {
-        cout.write(buffer, n);
+    void closeConnection() {
+        if(control_sock!=-1) {
+            sendCommand("QUIT\r\n");
+            close(control_sock);
+        }
     }
 
-    close(data_sock);
-    send_command(control_sock, ""); // 获取 226 响应
-}
-
-void handle_stor(int control_sock, const string &local_filename) {
-    auto pasv_response = send_command(control_sock, "PASV\r\n");
-    auto [ip, port] = parse_pasv_response(pasv_response);
-
-    int data_sock = connect_data_socket(ip, port);
-    if (data_sock < 0) {
-        cerr << "Failed to connect data socket\n";
-        return;
+    string sendCommand(const string& cmd) {
+        send(control_sock,cmd.c_str(),cmd.length(),0);
+        char buffer[4096];
+        string response;
+        ssize_t n;
+        while((n=recv(control_sock,buffer,sizeof(buffer)-1,0))>0) {
+            buffer[n]='\0';
+            response+=buffer;
+            if(response.find("\r\n")!=string::npos)
+                break;
+        }
+        cout << "[SERVER] " << response;
+        return response;
     }
 
-    send_command(control_sock, "STOR " + local_filename + "\r\n");
+    pair<string,int> parsePasvResponse(const string& response) {
+        size_t start=response.find("(");
+        size_t end=response.find(")");
+        if(start==string::npos || end==string::npos)
+            return {"",0};
 
-    ifstream file(local_filename, ios::binary);
-    if (!file) {
-        cerr << "Failed to open local file\n";
-        close(data_sock);
-        return;
+        string ip_port=response.substr(start+1,end-start-1);
+        stringstream ss(ip_port);
+        string token;
+        vector<int> parts;
+
+        while(getline(ss,token,',')) {
+            parts.push_back(stoi(token));
+        }
+
+        string ip=to_string(parts[0])+"."+to_string(parts[1])+"."+
+                  to_string(parts[2])+"."+to_string(parts[3]);
+        int port=parts[4]*256+parts[5];
+
+        return {ip,port};
     }
 
-    char buffer[4096];
-    while (file.read(buffer, sizeof(buffer)))
-        send(data_sock, buffer, file.gcount(), 0);
-    send(data_sock, buffer, file.gcount(), 0);
+    int connectDataSocket(const string& ip,int port) {
+        int sockfd=socket(AF_INET,SOCK_STREAM,0);
+        if(sockfd<0) return -1;
 
-    file.close();
-    close(data_sock);
-    send_command(control_sock, ""); // 等待 226
-}
+        sockaddr_in addr{};
+        addr.sin_family=AF_INET;
+        addr.sin_port=htons(port);
+        inet_pton(AF_INET,ip.c_str(),&addr.sin_addr);
 
-void handle_retr(int control_sock, const string &remote_filename) {
-    auto pasv_response = send_command(control_sock, "PASV\r\n");
-    auto [ip, port] = parse_pasv_response(pasv_response);
-
-    int data_sock = connect_data_socket(ip, port);
-    if (data_sock < 0) {
-        cerr << "Failed to connect data socket\n";
-        return;
+        if(connect(sockfd,(sockaddr *)&addr,sizeof(addr))<0) {
+            close(sockfd);
+            return -1;
+        }
+        return sockfd;
     }
 
-    send_command(control_sock, "RETR " + remote_filename + "\r\n");
+    vector<string> handleList() {
+        auto pasvResponse=sendCommand("PASV\r\n");
+        auto[ip,port]=parsePasvResponse(pasvResponse);
 
-    ofstream file("downloaded_" + remote_filename, ios::binary);
-    if (!file) {
-        cerr << "Failed to create local file\n";
-        close(data_sock);
-        return;
+        int dataSock=connectDataSocket(ip,port);
+        if(dataSock<0) {
+            cerr << "Failed to connect data socket\n";
+            return {};
+        }
+
+        sendCommand("LIST\r\n");
+
+        // 读取文件列表
+        char buffer[4096];
+        ssize_t n;
+        stringstream file_list;
+        while((n=recv(dataSock,buffer,sizeof(buffer),0))>0) {
+            file_list.write(buffer,n);
+        }
+
+        close(dataSock);
+        sendCommand(""); // 等待 226
+
+        // 解析文件列表
+        vector<string> files;
+        string line;
+        while(getline(file_list,line)) {
+            files.push_back(line);
+            cout << line << endl;  // 打印每个文件名
+        }
+
+        return files;
     }
 
-    char buffer[4096];
-    ssize_t n;
-    while ((n = recv(data_sock, buffer, sizeof(buffer), 0)) > 0)
-        file.write(buffer, n);
+    void handleRetr(const string& remoteFilename) {
+        auto pasvResponse=sendCommand("PASV\r\n");
+        auto[ip,port]=parsePasvResponse(pasvResponse);
 
-    file.close();
-    close(data_sock);
-    send_command(control_sock, ""); // 等待 226
-}
+        int dataSock=connectDataSocket(ip,port);
+        if(dataSock<0) {
+            cerr << "Failed to connect data socket\n";
+            return;
+        }
+
+        sendCommand("RETR "+remoteFilename+"\r\n");
+
+        ofstream file("downloaded_"+remoteFilename,ios::binary);
+        if(!file) {
+            cerr << "Failed to create local file\n";
+            close(dataSock);
+            return;
+        }
+
+        char buffer[4096];
+        ssize_t n;
+        while((n=recv(dataSock,buffer,sizeof(buffer),0))>0)
+            file.write(buffer,n);
+
+        file.close();
+        close(dataSock);
+        sendCommand(""); // 等待 226
+    }
+
+    // 让用户选择一个文件进行下载
+    void chooseFileToDownload(const vector<string>& files) {
+        if(files.empty()) {
+            cout << "No files available to download.\n";
+            return;
+        }
+
+        cout << "Enter the number of the file you want to download (1 to " << files.size() << "): ";
+        int choice;
+        cin >> choice;
+
+        if(choice<1 || choice>files.size()) {
+            cout << "Invalid choice.\n";
+            return;
+        }
+
+        string filename=files[choice-1];
+        cout << "Downloading: " << filename << endl;
+        handleRetr(filename);
+    }
+
+private:
+    string server_ip;
+    int control_port;
+    int control_sock;
+};
 
 int main() {
-    int control_sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (control_sock < 0) {
-        cerr << "Failed to create control socket\n";
+    FTPClient client(SERVER_IP,CONTROL_PORT);
+    if(!client.connectToServer()) {
+        cerr << "Failed to connect to the FTP server\n";
         return 1;
     }
 
-    sockaddr_in server_addr{};
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(CONTROL_PORT);
-    inet_pton(AF_INET, SERVER_IP.c_str(), &server_addr.sin_addr);
+    // 获取文件列表
+    vector<string> files=client.handleList();
+    // 让用户选择文件下载
+    client.chooseFileToDownload(files);
 
-    if (connect(control_sock, (sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        cerr << "Failed to connect to server\n";
-        close(control_sock);
-        return 1;
-    }
-
-    // 读取欢迎信息
-    char buffer[1024];
-    recv(control_sock, buffer, sizeof(buffer), 0);
-    cout << "[SERVER] " << buffer;
-
-    // 示例操作：
-    handle_list(control_sock);
-    handle_stor(control_sock, "upload_test.txt");
-    handle_retr(control_sock, "upload_test.txt");
-
-    send_command(control_sock, "QUIT\r\n");
-    close(control_sock);
+    client.closeConnection();
     return 0;
 }

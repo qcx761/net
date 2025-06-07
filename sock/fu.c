@@ -4,12 +4,12 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 
-#define PORT 12345
+#define PORT 2100
 #define BUFFER_SIZE 1024
 
 int main() {
     int server_fd, new_socket;
-    struct sockaddr_in saddres;
+    struct sockaddr_in address;
     int opt = 1;
     int addrlen = sizeof(address);
     char buffer[BUFFER_SIZE] = {0};

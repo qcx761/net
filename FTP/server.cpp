@@ -315,7 +315,6 @@ void handle_pasv(int control_fd,ConnectionGroup& group){
             }else{
 
                 free(filename);
-                continue;
             }
 
             {
