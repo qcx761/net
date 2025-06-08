@@ -54,7 +54,7 @@ public:
     }
 
     int get_control_from_data(int data_fd) {
-        lock_guard<mutex> lock(mtx);
+        lock_guard<mutex> lock(map_mtx);
         auto it=data_to_control.find(data_fd);
         return (it==data_to_control.end()) ? -1 : it->second;
     }
@@ -197,6 +197,8 @@ public:
                     int port=get_socket_local_port(fd);
 
                     if(port==CONTROL_PORT) { // 控制连接
+cout<<"控制连接进入"<<endl;
+
                         handle_control_fd(fd);
                     }else { // 数据连接
 
@@ -228,7 +230,9 @@ cout<<"数据连接进入"<<endl;
 
                         thread_pool.enqueue([this,fd,command,filename](){handle_data_connection(fd,command,filename);});
                         // this允许访问handle_data_connection函数，并将其交给线程池实现
-                        epoll_ctl(epfd,EPOLL_CTL_DEL,fd,nullptr); // 结束数据连接 
+
+
+                        // epoll_ctl(epfd,EPOLL_CTL_DEL,fd,nullptr); // 结束数据连接 
                     }
                 }
             }
@@ -362,20 +366,16 @@ private:
 
     void handle_data_connection(int fd,int command,const string& filename) {
 
-        //cout<<command<<endl;
+        cout<<command<<endl;
+
+
 
         if(command==1) {
-            cout<<"数据连接早就建立了"<<endl;
+cout<<"数据连接早就建立了"<<endl;
             // handle_pasv(fd);
             // string response="PASV mode data connection established\n";
             // send(fd,response.c_str(),response.size(),0);
         }else if(command==2) {
-
-
-
-            
-
-
 
 
 
@@ -483,19 +483,6 @@ private:
 
         group.bind_data_to_control(data_fd,control_fd);
         
-
-        // {
-        //     unique_lock<mutex> lock(mtx);
-        //     cv.wait(lock,[]{return is_continue;});   // 每个客户端弄个
-        // }
-        
-
-
-        // {
-        //     unique_lock<mutex> lock(mtx);
-        //     is_continue=false;
-        // }
-
     }
 
     void handle_list(int fd) {
