@@ -44,8 +44,20 @@ public:
 class ConnectionGroup {
 public:
     mutex mtx;
+    mutex map_mtx;
     vector<ControlConnect> connections;
-    unordered_map<int, int> data_to_control;
+    unordered_map<int,int> data_to_control;
+    
+    void bind_data_to_control(int data_fd,int control_fd) {
+        lock_guard<mutex> lock(map_mtx);
+        data_to_control[data_fd]=control_fd;
+    }
+
+    int get_control_from_data(int data_fd) {
+        lock_guard<mutex> lock(mtx);
+        auto it=data_to_control.find(data_fd);
+        return (it==data_to_control.end()) ? -1 : it->second;
+    }
     
 
     void add_or_update(int fd,int cmd,const string& fname="") {
@@ -198,24 +210,22 @@ cout<<"数据连接进入"<<endl;
 
 
 // 从数据u连接获取控制连接fd
-                        int control_fd
+                        int control_fd=group.get_control_from_data(fd);
 
 
 
 
 
-                        int command=group.get_command_type(fd);
+                        int command=group.get_command_type(control_fd);
 
-
-
-
-                        //cout<<command<<endl;
 
 
 // 数据连接fd要关联控制连接的
 
 
-                        string filename=group.get_filename(fd);
+                        string filename=group.get_filename(control_fd);
+
+
                         thread_pool.enqueue([this,fd,command,filename](){handle_data_connection(fd,command,filename);});
                         // this允许访问handle_data_connection函数，并将其交给线程池实现
                         epoll_ctl(epfd,EPOLL_CTL_DEL,fd,nullptr); // 结束数据连接 
@@ -320,7 +330,6 @@ private:
         if(cmd=="PASV\r\n") {
 
             handle_pasv(fd);
-
             group.add_or_update(fd,1);
             string response="200 OK\n";
             send(fd,response.c_str(),response.size(),0);
@@ -370,9 +379,9 @@ cout<<"111"<<endl;
         //cout<<command<<endl;
 
         if(command==1) {
-            handle_pasv(fd);
-            string response="PASV mode data connection established\n";
-            send(fd,response.c_str(),response.size(),0);
+            // handle_pasv(fd);
+            // string response="PASV mode data connection established\n";
+            // send(fd,response.c_str(),response.size(),0);
         }else if(command==2) {
 
 
@@ -471,7 +480,9 @@ cout<<"111"<<endl;
         }
 
 
+        // 关联连接  control_fd  data_fd
 
+        group.bind_data_to_control(data_fd,control_fd);
         
 
         // {
@@ -485,17 +496,6 @@ cout<<"111"<<endl;
         //     unique_lock<mutex> lock(mtx);
         //     is_continue=false;
         // }
-
-
-
-
-
-
-
-         
-
-
-
 
     }
 
@@ -519,6 +519,8 @@ cout<<"111"<<endl;
         
         closedir(dp);
         send(fd,list_str.c_str(),list_str.size(),0);
+
+        close(fd);
     }
 
     void handle_retr(int fd,const string& filename) {

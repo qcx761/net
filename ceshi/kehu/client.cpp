@@ -150,9 +150,9 @@ int main() {
     send_command(control_sock, "LIST\r\n");  // 发送LIST命令
     char buffer[4096];
     ssize_t bytes_received;
+
     while ((bytes_received = recv(data_sock, buffer, sizeof(buffer), 0)) > 0) {
-        cout << buffer << endl;
-        // write(STDOUT_FILENO, buffer, bytes_received);  // 打印到终端
+        cout.write(buffer, bytes_received);  // 正确地输出接收到的字节
     }
     close(data_sock);
 
