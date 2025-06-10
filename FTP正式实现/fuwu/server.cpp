@@ -49,6 +49,19 @@ public:
     unordered_map<int, int> data_to_control;
     unordered_map<int, int> listen_to_control;  // 新增：监听套接字到控制连接的映射
 
+
+
+
+
+
+
+
+
+
+
+
+
+
     void bind_data_to_control(int data_fd, int control_fd) {
         lock_guard<mutex> lock(map_mtx);
         data_to_control[data_fd] = control_fd;
@@ -214,10 +227,10 @@ public:
 
                         // 从数据连接获取控制连接fd
                         int control_fd = group.get_control_from_data(fd);
-                        if (control_fd == -1) {
+                        if (control_fd == -1) { // 没有获取说明数据连接没有建立  fd是数据链接监听套接字
                             // 可能是PASV模式的监听套接字
                             control_fd = group.get_control_from_listen(fd);
-                            if (control_fd != -1) {
+                            if (control_fd != -1) {  
                                 // 有新的数据连接到来
                                 sockaddr_in client_addr{};
                                 socklen_t client_len = sizeof(client_addr);
@@ -241,6 +254,10 @@ public:
                                 // 关联数据连接和控制连接
                                 group.bind_data_to_control(data_fd, control_fd);
                                 cout << "New data connection accepted for control fd: " << control_fd << ", data fd: " << data_fd << endl;
+
+
+                                // close_connection(fd);
+
                             } else {
                                 cerr << "No control connection associated with data fd: " << fd << endl;
                                 close_connection(fd);
@@ -393,7 +410,7 @@ private:
                 send(fd, err.c_str(), err.size(), 0);
             }
         }
-
+        
         close(fd);
     }
 
