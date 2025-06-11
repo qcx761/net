@@ -48,12 +48,10 @@ public:
     unordered_map<int, int> data_to_control;
     unordered_map<int, int> listen_to_control;  // 新增：监听套接字到控制连接的映射
 
-
-
-void unbind_control_from_data(int data_fd) {
-    lock_guard<mutex> lock(mtx);  // 加锁保证线程安全
-    data_to_control.erase(data_fd);  // 直接删除该条目
-}
+    void unbind_control_from_data(int data_fd) {
+        lock_guard<mutex> lock(mtx);  // 加锁保证线程安全
+        data_to_control.erase(data_fd);  // 直接删除该条目
+    }
 
     void bind_data_to_control(int data_fd, int control_fd) {
         lock_guard<mutex> lock(mtx);
@@ -83,7 +81,6 @@ void unbind_control_from_data(int data_fd) {
         lock_guard<mutex> lock(mtx);
         connections.erase(remove_if(connections.begin(), connections.end(), [fd](const ControlConnect& connect) { return connect.control_fd == fd; }), connections.end());
         // 同时从data_to_control中移除
-        //lock_guard<mutex> lock2(map_mtx);
         data_to_control.erase(fd);
     }
 
@@ -112,11 +109,15 @@ void unbind_control_from_data(int data_fd) {
         return (it == listen_to_control.end()) ? -1 : it->second;
     }
 
-void unbind_control_from_listen(int listen_fd) {
-    lock_guard<mutex> lock(mtx);  // 加锁保证线程安全
-    listen_to_control.erase(listen_fd);  // 直接删除该条目
-}
+    void unbind_control_from_listen(int listen_fd) {
+        lock_guard<mutex> lock(mtx);  // 加锁保证线程安全
+        listen_to_control.erase(listen_fd);  // 直接删除该条目
+    }
 
+    void remove_listen_socket(int listen_fd) {
+        lock_guard<mutex> lock(mtx);
+        listen_to_control.erase(listen_fd);
+    }
 };
 
 class FTPServer {
@@ -225,10 +226,10 @@ public:
                         cout << "数据连接进入" << endl;
 
                         // 从数据连接获取控制连接fd
-                        int control_fd = group.get_control_from_data(fd);// 能不能获得控制fd，不能就是数据监听fd
+                        int control_fd = group.get_control_from_data(fd); // 能不能获得控制fd，不能就是数据监听fd
                         if (control_fd == -1) {
                             // 可能是PASV模式的监听套接字
-                            control_fd = group.get_control_from_listen(fd);// 数据监听fd获取控制fd
+                            control_fd = group.get_control_from_listen(fd); // 数据监听fd获取控制fd
                             if (control_fd != -1) {
                                 // 有新的数据连接到来
                                 sockaddr_in client_addr{};
@@ -254,10 +255,12 @@ public:
                                 group.bind_data_to_control(data_fd, control_fd);
                                 cout << "New data connection accepted for control fd: " << control_fd << ", data fd: " << data_fd << endl;
 
+                                // 不要在这里关闭监听套接字，因为数据传输可能还没有开始
+                                // group.unbind_control_from_listen(fd);
+                                // close(fd);
 
-group.unbind_control_from_listen(fd);
-close(fd);
-
+                                // 我们需要保留监听套接字，因为数据传输可能还没有开始
+                                // 监听套接字的清理应该在数据传输完成后进行
                             } else {
                                 cerr << "No control connection associated with data fd: " << fd << endl;
                                 close_connection(fd);
@@ -272,14 +275,8 @@ close(fd);
                                 handle_data_connection(fd, command, filename);
                             });
 
-
-
-
-
-// 删除控制连接和数据链接的映射
-group.unbind_control_from_data(fd);
-
-
+                            // 删除控制连接和数据链接的映射
+                            group.unbind_control_from_data(fd);
 
                             epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr); // 结束数据连接
                         }
@@ -401,23 +398,23 @@ private:
     void handle_data_connection(int fd, int command, const string& filename) {
         cout << "Command type: " << command << endl;
 
-        if (command == 1) {
-            cout << "数据连接早就建立了" << endl;
-            // 理论上是不会进来的
-            // handle_pasv(fd);
-            // string response="PASV mode data connection established\n";
-            // send(fd,response.c_str(),response.size(),0);
-            
-        } else if (command == 2) {
+        if (command == 1) {  // PASV模式
+            // 获取控制连接fd
+            int control_fd = group.get_control_from_data(fd);
+            if (control_fd != -1) {
+                // 数据传输完成后，清理PASV资源
+                cleanup_pasv_resources(control_fd);
+            }
+        } else if (command == 2) {  // LIST命令
             handle_list(fd);
-        } else if (command == 3) {
+        } else if (command == 3) {  // RETR命令（下载）
             if (!filename.empty()) {
                 handle_retr(fd, filename);
             } else {
                 string err = "550 No such file or directory.\n";
                 send(fd, err.c_str(), err.size(), 0);
             }
-        } else if (command == 4) {
+        } else if (command == 4) {  // STOR命令（上传）
             if (!filename.empty()) {
                 handle_stor(fd, filename);
             } else {
@@ -426,13 +423,13 @@ private:
             }
         }
         
-        close(fd);
+        close(fd);  // 关闭数据连接
     }
 
     void handle_pasv(int control_fd) {
-        cout << "处理PASV.." <<endl;
+        cout << "处理PASV.." << endl;
         srand(time(NULL));
-        int port = rand() % 40000 + 1024;
+        int port = rand() % 40000 + 1024;  // 随机选择数据端口（1024-49151）
         int p1 = port / 256;
         int p2 = port % 256;
 
@@ -485,7 +482,7 @@ private:
     }
 
     void handle_list(int fd) {
-        cout << "处理LIST.." <<endl;
+        cout << "处理LIST.." << endl;
 
         DIR* dp = opendir(".");
         if (!dp) {
@@ -498,7 +495,7 @@ private:
         struct dirent* entry;
 
         while ((entry = readdir(dp)) != nullptr) {
-            if (entry->d_name[0] == '.') continue;
+            if (entry->d_name[0] == '.') continue;  // 跳过隐藏文件
             list_str += entry->d_name;
             list_str += "\n";
         }
@@ -508,7 +505,7 @@ private:
     }
 
     void handle_retr(int fd, const string& filename) {
-        cout << "处理RETR.." <<endl;
+        cout << "处理RETR.." << endl;
 
         int file_fd = open(filename.c_str(), O_RDONLY);
         if (file_fd < 0) {
@@ -518,7 +515,6 @@ private:
         }
 
         struct stat statbuf{};
-
         if (fstat(file_fd, &statbuf) < 0) {
             string err = "550 Failed to get file info\n";
             send(fd, err.c_str(), err.size(), 0);
@@ -537,6 +533,29 @@ private:
                 }
                 break;
             }
+        }
+
+        close(file_fd);
+    }
+
+    void handle_stor(int fd, const string& filename) {
+        cout << "处理STOR.." << endl;
+
+        int file_fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        if (file_fd < 0) {
+            string err = "550 Failed to create file\n";
+            send(fd, err.c_str(), err.size(), 0);
+            return;
+        }
+
+        char buf[4096];
+        ssize_t n;
+        while ((n = recv(fd, buf, sizeof(buf), 0)) > 0) {
+            write(file_fd, buf, n);  // 写入文件
+        }
+
+        if (n < 0 && errno != EINTR) {
+            perror("recv error");
         }
 
         close(file_fd);
@@ -570,22 +589,16 @@ private:
         return server_ip;
     }
 
-    void handle_stor(int fd, const string& filename) {
-        cout << "处理STOR.." <<endl;
-
-        int file_fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
-        if (file_fd < 0) {
-            string err = "550 Failed to create file\n";
-            send(fd, err.c_str(), err.size(), 0);
-            return;
+    // 清理PASV模式的相关资源（监听套接字）
+    void cleanup_pasv_resources(int control_fd) {
+        // 获取与控制连接关联的监听套接字
+        int listen_fd = group.get_control_from_listen(control_fd);
+        if (listen_fd != -1) {
+            // 从映射中移除监听套接字
+            group.remove_listen_socket(listen_fd);
+            // 关闭监听套接字
+            close(listen_fd);
         }
-
-        char buf[4096];
-        ssize_t n;
-        while ((n = recv(fd, buf, sizeof(buf), 0)) > 0) {
-            write(file_fd, buf, n);
-        }
-        close(file_fd);
     }
 };
 
