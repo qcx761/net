@@ -50,10 +50,10 @@ public:
 
 
 
-    void unbind_control_from_data(int data_fd) {
-        lock_guard<mutex> lock(mtx);  // 加锁保证线程安全
-        data_to_control.erase(data_fd);  // 直接删除该条目
-    }
+void unbind_control_from_data(int data_fd) {
+    lock_guard<mutex> lock(mtx);  // 加锁保证线程安全
+    data_to_control.erase(data_fd);  // 直接删除该条目
+}
 
     void bind_data_to_control(int data_fd, int control_fd) {
         lock_guard<mutex> lock(mtx);
@@ -112,10 +112,11 @@ public:
         return (it == listen_to_control.end()) ? -1 : it->second;
     }
 
-    void unbind_control_from_listen(int listen_fd) {
-        lock_guard<mutex> lock(mtx);  // 加锁保证线程安全
-        listen_to_control.erase(listen_fd);  // 直接删除该条目
-    }
+void unbind_control_from_listen(int listen_fd) {
+    lock_guard<mutex> lock(mtx);  // 加锁保证线程安全
+    listen_to_control.erase(listen_fd);  // 直接删除该条目
+}
+
 };
 
 class FTPServer {
@@ -358,6 +359,8 @@ private:
 
         if (pos == string::npos) { // 没找到空格
             cmd = cmd_line;
+            cmd.erase(remove(cmd.begin(), cmd.end(), '\r'), cmd.end());
+            cmd.erase(remove(cmd.begin(), cmd.end(), '\n'), cmd.end());
             arg = "";
         } else {
             cmd = cmd_line.substr(0, pos);
@@ -365,17 +368,18 @@ private:
             // 删除\r与\n
             arg.erase(remove(arg.begin(), arg.end(), '\r'), arg.end());
             arg.erase(remove(arg.begin(), arg.end(), '\n'), arg.end());
+            
         }
 
         // 将命令转化为大写字母
         transform(cmd.begin(), cmd.end(), cmd.begin(), ::toupper);
 
-        if (cmd == "PASV\r\n") {
+        if (cmd == "PASV") {
             handle_pasv(fd);
             group.add_or_update(fd, 1);
             string response = "200 OK\n";
             send(fd, response.c_str(), response.size(), 0);
-        } else if (cmd == "LIST\r\n") {
+        } else if (cmd == "LIST") {
             group.add_or_update(fd, 2);
             string response = "200 OK\n";
             send(fd, response.c_str(), response.size(), 0);
