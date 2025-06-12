@@ -7,7 +7,6 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <fstream>
-#include <sstream>
 
 using namespace std;
 
@@ -31,23 +30,14 @@ int connect_to_server(const string& ip, int port) {
     return sock;
 }
 
-string read_line(int fd) {
-    string line;
-    char ch;
-    while (recv(fd, &ch, 1, 0) > 0) {
-        if (ch == '\n') break;
-        if (ch != '\r') line += ch;
-    }
-    return line;
-}
-
 pair<string, int> enter_passive_mode(int control_fd) {
     send(control_fd, "PASV\r\n", 6, 0);
-    string response = read_line(control_fd);
-    cout << "Server: " << response << endl;
+    char buffer[1024];
+    recv(control_fd, buffer, sizeof(buffer), 0);
+    cout << "Server: " << buffer;
 
     int h1, h2, h3, h4, p1, p2;
-    sscanf(response.c_str(), "227 entering passive mode (%d,%d,%d,%d,%d,%d)", &h1, &h2, &h3, &h4, &p1, &p2);
+    sscanf(buffer, "227 entering passive mode (%d,%d,%d,%d,%d,%d)", &h1, &h2, &h3, &h4, &p1, &p2);
     string ip = to_string(h1) + "." + to_string(h2) + "." + to_string(h3) + "." + to_string(h4);
     int port = p1 * 256 + p2;
     return {ip, port};
@@ -58,16 +48,16 @@ void ftp_list(int control_fd) {
     int data_fd = connect_to_server(ip, port);
 
     send(control_fd, "LIST\r\n", 6, 0);
-    string ack = read_line(control_fd);
-    cout << "Server: " << ack << endl;
 
     char buffer[4096];
     ssize_t n;
     while ((n = recv(data_fd, buffer, sizeof(buffer), 0)) > 0) {
         cout.write(buffer, n);
     }
+    if(n==0){
+        cout << "Server closed the data connection." << endl;
+    }
     close(data_fd);
-    cout << "\nServer closed the data connection." << endl;
 }
 
 void ftp_retr(int control_fd, const string& filename) {
@@ -76,8 +66,6 @@ void ftp_retr(int control_fd, const string& filename) {
 
     string cmd = "RETR " + filename + "\r\n";
     send(control_fd, cmd.c_str(), cmd.size(), 0);
-    string ack = read_line(control_fd);
-    cout << "Server: " << ack << endl;
 
     ofstream ofs(filename, ios::binary);
     char buffer[4096];
@@ -91,19 +79,18 @@ void ftp_retr(int control_fd, const string& filename) {
 }
 
 void ftp_stor(int control_fd, const string& filename) {
-    ifstream ifs(filename, ios::binary);
-    if (!ifs) {
-        cerr << "Cannot open file: " << filename << endl;
-        return;
-    }
-
     auto [ip, port] = enter_passive_mode(control_fd);
     int data_fd = connect_to_server(ip, port);
 
     string cmd = "STOR " + filename + "\r\n";
     send(control_fd, cmd.c_str(), cmd.size(), 0);
-    string ack = read_line(control_fd);
-    cout << "Server: " << ack << endl;
+
+    ifstream ifs(filename, ios::binary);
+    if (!ifs) {
+        cerr << "Cannot open file: " << filename << endl;
+        close(data_fd);
+        return;
+    }
 
     char buffer[4096];
     while (!ifs.eof()) {
@@ -127,26 +114,15 @@ int main() {
         cout << "ftp> ";
         getline(cin, cmd);
 
-        istringstream iss(cmd);
-        string op, filename;
-        iss >> op >> filename;
-
-        if (op == "LIST") {
+        if (cmd == "LIST") {
             ftp_list(control_fd);
-        } else if (op == "RETR") {
-            if (filename.empty()) {
-                cerr << "Filename required.\n";
-            } else {
-                ftp_retr(control_fd, filename);
-            }
-        } else if (op == "STOR") {
-            if (filename.empty()) {
-                cerr << "Filename required.\n";
-            } else {
-                ftp_stor(control_fd, filename);
-            }
-        } else if (op == "QUIT") {
-            send(control_fd, "QUIT\r\n", 6, 0);
+        } else if (cmd.substr(0, 4) == "RETR") {
+            string filename = cmd.substr(5);
+            ftp_retr(control_fd, filename);
+        } else if (cmd.substr(0, 4) == "STOR") {
+            string filename = cmd.substr(5);
+            ftp_stor(control_fd, filename);
+        } else if (cmd == "QUIT") {
             break;
         } else {
             cout << "Unknown command.\n";
