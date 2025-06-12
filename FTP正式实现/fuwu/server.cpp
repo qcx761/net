@@ -554,9 +554,9 @@ private:
             write(file_fd, buf, n);  // 写入文件
         }
 
-        if (n < 0 && errno != EINTR) {
-            perror("recv error");
-        }
+        // if (n < 0 && errno != EINTR) {
+        //     perror("recv error");
+        // }
 
         close(file_fd);
     }
