@@ -118,6 +118,17 @@ public:
         lock_guard<mutex> lock(mtx);
         listen_to_control.erase(listen_fd);
     }
+
+    int get_listen_from_control(int control_fd) {
+    lock_guard<mutex> lock(mtx);
+    for (const auto& pair : listen_to_control) {
+        if (pair.second == control_fd) {
+            return pair.first;  // 返回监听套接字fd
+        }
+    }
+    return -1;
+}
+
 };
 
 class FTPServer {
@@ -374,20 +385,20 @@ private:
         if (cmd == "PASV") {
             handle_pasv(fd);
             group.add_or_update(fd, 1);
-            string response = "200 OK\n";
-            send(fd, response.c_str(), response.size(), 0);
+            //string response = "200 OK\n";
+            //send(fd, response.c_str(), response.size(), 0);
         } else if (cmd == "LIST") {
             group.add_or_update(fd, 2);
-            string response = "200 OK\n";
-            send(fd, response.c_str(), response.size(), 0);
+            //string response = "200 OK\n";
+            //send(fd, response.c_str(), response.size(), 0);
         } else if (cmd == "RETR") {
             group.add_or_update(fd, 3, arg);
-            string response = "200 OK\n";
-            send(fd, response.c_str(), response.size(), 0);
+            //string response = "200 OK\n";
+            //send(fd, response.c_str(), response.size(), 0);
         } else if (cmd == "STOR") {
             group.add_or_update(fd, 4, arg);
-            string response = "200 OK\n";
-            send(fd, response.c_str(), response.size(), 0);
+            //string response = "200 OK\n";
+            //send(fd, response.c_str(), response.size(), 0);
         } else {
             string response = "502 Command not implemented\n";
             send(fd, response.c_str(), response.size(), 0);
@@ -477,6 +488,7 @@ private:
         char str[4][4];
         sscanf(ip_str, "%3[^.].%3[^.].%3[^.].%3[^.]", str[0], str[1], str[2], str[3]);
         char arr[100];
+        memset(arr, 0, sizeof(arr));
         sprintf(arr, "227 entering passive mode (%s,%s,%s,%s,%d,%d)\r\n", str[0], str[1], str[2], str[3], p1, p2);
         send(control_fd, arr, strlen(arr), 0);
     }
@@ -589,17 +601,16 @@ private:
         return server_ip;
     }
 
-    // 清理PASV模式的相关资源（监听套接字）
+
     void cleanup_pasv_resources(int control_fd) {
-        // 获取与控制连接关联的监听套接字
-        int listen_fd = group.get_control_from_listen(control_fd);
+        int listen_fd = group.get_listen_from_control(control_fd);
         if (listen_fd != -1) {
-            // 从映射中移除监听套接字
+            epoll_ctl(epfd, EPOLL_CTL_DEL, listen_fd, nullptr);
             group.remove_listen_socket(listen_fd);
-            // 关闭监听套接字
             close(listen_fd);
         }
     }
+
 };
 
 int main() {
